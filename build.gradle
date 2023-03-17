@@ -30,6 +30,13 @@ dependencies {
 	implementation 'org.springframework.session:spring-session-jdbc'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
+	// JSON
+	// implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.14.1'
+	// implementation 'com.fasterxml.jackson.core:jackson-databind:2.13.4.2'
+	// implementation 'org.json:json:20220924'
+	// implementation 'com.googlecode.json-simple:json-simple:1.1.1'
+	implementation 'com.google.code.gson:gson:2.9.0'
+
 	// kafka
     implementation 'org.springframework.kafka:spring-kafka'
 
