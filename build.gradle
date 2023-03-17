@@ -33,6 +33,13 @@ dependencies {
 	// kafka
     implementation 'org.springframework.kafka:spring-kafka'
 
+	runtimeOnly 'com.h2database:h2'
+
+	// postgresql
+	// https://mvnrepository.com/artifact/org.postgresql/postgresql
+	implementation 'org.postgresql:postgresql:42.2.25'
+	//runtimeOnly 'org.postgresql:postgresql'
+
 	testImplementation('org.springframework.boot:spring-boot-starter-test') {
         exclude group: 'org.junit.vintage', module: 'junit-vintage-engine'
     }
