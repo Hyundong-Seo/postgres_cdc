@@ -1,20 +1,20 @@
 spring:
   datasource:
     driver-class-name: org.postgresql.Driver
-    url: jdbc:postgresql://localhost:5432/dbbase
-    username: postgresuser
+    url: jdbc:postgresql://localhost:5432/postgres
+    username: postgres
     password: post
   jpa:
     hibernate:
       ddl-auto: update
-    database: postgres
+    database: POSTGRESQL
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     generate-ddl: true
     show-sql: true
   kafka:
     consumer:
       bootstrap-servers: localhost:9092
-      group-id: 3
+      group-id: age
       auto-offset-reset: latest
       enable-auto-commit: true
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
