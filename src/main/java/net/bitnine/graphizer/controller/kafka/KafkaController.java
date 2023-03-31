@@ -45,17 +45,15 @@ public class KafkaController {
                 if (updateType.equals("c")) {
                     JsonObject after = payloadObj.get("after").getAsJsonObject();
                     SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
-                    String[] pkCol = syncEntity.getRdb_pk_columns().split(",");
-                    String conditions = "";
-                    for(int i=0; i<pkCol.length; i++) {
-                        conditions = conditions + " and " + pkCol[i] + " = " + after.getAsJsonObject().get(pkCol[i]);
-                    }
-
-                    kafkaConsumerService.insertVertexData(conditions, syncEntity);
+                    kafkaConsumerService.insertVertexData(after, syncEntity);
                 } else if (updateType.equals("u")) {
-                    System.out.println("todo update");
+                    JsonObject after = payloadObj.get("after").getAsJsonObject();
+                    SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
+                    kafkaConsumerService.updateVertexData(after, syncEntity);
                 } else if (updateType.equals("d")) {
-                    System.out.println("todo delete");
+                    JsonObject before = payloadObj.get("before").getAsJsonObject();
+                    SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
+                    kafkaConsumerService.deleteVertexData(before, syncEntity);
                 }
             } catch (Exception e) {
                 System.out.println(e.getMessage());
