@@ -29,36 +29,34 @@ public class KafkaController {
     private static final String topicName = "postgres.ag_catalog.tb_sample1";
     private static final String groupId = "age";
 
+    @Deprecated
     @KafkaListener(topics = topicName, groupId = groupId)
     public void listen(String message) {
         Gson gson = new Gson();
         JsonObject payloadObj = gson.fromJson(message, JsonObject.class).get("payload").getAsJsonObject();
-        String before = payloadObj.get("before").getAsJsonObject().toString();
-        String after = payloadObj.get("after").getAsJsonObject().toString();
+        // String before = payloadObj.get("before").getAsJsonObject().toString();
+        String schemaName = payloadObj.get("source").getAsJsonObject().get("schema").getAsString();
         String tableName = payloadObj.get("source").getAsJsonObject().get("table").getAsString();
         String updateType = payloadObj.get("op").getAsString();
-        System.out.println("message: " + message);
-        System.out.println("before: " + before);
-        System.out.println("after: " + after);
-
-        String sql = " WITH oidb AS ( "
-            + "SELECT t.table_catalog AS dbname, t.table_name AS tbname, pgc.oid AS oid "
-            + "FROM information_schema.tables t "
-            + "INNER JOIN pg_catalog.pg_class pgc "
-            + "ON t.table_name = pgc.relname "
-            + "WHERE t.table_type = 'BASE TABLE' "
-            + "AND t.table_name = '" + tableName + "' "
-            + ") "
-            + "SELECT (SELECT oidb.oid FROM oidb) AS oid_no, a.ctid as ctid_no, '" + updateType + "' as update_type "
-            + "FROM " + tableName + " a "
-            + "order by ctid_no desc "
-            + "limit 1;";
 
         try (Connection connection = dataSource.getConnection()) {
-            kafkaConsumerService.insertSyncData(tableName, updateType, sql);
-
+            // vertex일 경우와 edge일 경우 다르게 동작
             try {
-                SyncEntity entity = kafkaConsumerService.syncData(sql);
+                if (updateType.equals("c")) {
+                    JsonObject after = payloadObj.get("after").getAsJsonObject();
+                    SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
+                    String[] pkCol = syncEntity.getRdb_pk_columns().split(",");
+                    String conditions = "";
+                    for(int i=0; i<pkCol.length; i++) {
+                        conditions = conditions + " and " + pkCol[i] + " = " + after.getAsJsonObject().get(pkCol[i]);
+                    }
+
+                    kafkaConsumerService.insertVertexData(conditions, syncEntity);
+                } else if (updateType.equals("u")) {
+                    System.out.println("todo update");
+                } else if (updateType.equals("d")) {
+                    System.out.println("todo delete");
+                }
             } catch (Exception e) {
                 System.out.println(e.getMessage());
             }
