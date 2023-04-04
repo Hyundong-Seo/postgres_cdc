@@ -27,8 +27,6 @@ public class SyncEntity implements Serializable {
     @Id
     private String rdb_pk_columns;
     @Id
-    private String rdb_pk_columns_values;
-    @Id
     private String graph_name;
     @Id
     private String label_name;
@@ -41,14 +39,13 @@ public class SyncEntity implements Serializable {
 	}
     
     @Builder
-    public SyncEntity(String rdb_schema, String rdb_table_name, int rdb_table_oid, String rdb_columns, String rdb_pk_columns, String rdb_pk_columns_values,
+    public SyncEntity(String rdb_schema, String rdb_table_name, int rdb_table_oid, String rdb_columns, String rdb_pk_columns,
                     String graph_name, String label_name, int label_oid, String label_properties) {
 		this.rdb_schema = rdb_schema;
 		this.rdb_table_name = rdb_table_name;
 		this.rdb_table_oid = rdb_table_oid;
         this.rdb_columns = rdb_columns;
         this.rdb_pk_columns = rdb_pk_columns;
-        this.rdb_pk_columns_values = rdb_pk_columns_values;
         this.graph_name = graph_name;
         this.label_name = label_name;
         this.label_oid = label_oid;

@@ -17,7 +17,6 @@ public class SyncMapper implements RowMapper<SyncEntity> {
         syncEntity.setRdb_table_oid(rs.getInt("rdb_table_oid"));
         syncEntity.setRdb_columns(rs.getString("rdb_columns"));
         syncEntity.setRdb_pk_columns(rs.getString("rdb_pk_columns"));
-        syncEntity.setRdb_pk_columns_values(rs.getString("rdb_pk_columns_values"));
         syncEntity.setGraph_name(rs.getString("graph_name"));
         syncEntity.setLabel_name(rs.getString("label_name"));
         syncEntity.setLabel_oid(rs.getInt("label_oid"));
