@@ -1,5 +1,9 @@
 package net.bitnine.graphizer.service;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Map;
+
 import javax.sql.DataSource;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +24,7 @@ public class KafkaConsumerService {
 
     @Deprecated
     public SyncEntity syncData(String schemaName, String tableName) {
-        String sql = "select rdb_schema, rdb_table_name, rdb_table_oid, rdb_columns, rdb_pk_columns, rdb_pk_columns_values, graph_name, label_name, label_oid, label_properties "
+        String sql = "select rdb_schema, rdb_table_name, rdb_table_oid, rdb_columns, rdb_pk_columns, graph_name, label_name, label_oid, label_properties "
         + "from tb_vlabel_info "
         + "where rdb_schema = ? " 
         + "and rdb_table_name = ?";
@@ -32,7 +36,6 @@ public class KafkaConsumerService {
                 rs.getInt("rdb_table_oid"),
                 rs.getString("rdb_columns"),
                 rs.getString("rdb_pk_columns"),
-                rs.getString("rdb_pk_columns_values"),
                 rs.getString("graph_name"),
                 rs.getString("label_name"),
                 rs.getInt("label_oid"),
@@ -78,7 +81,7 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
-    public void updateVertexData(JsonObject after, SyncEntity syncEntity) {
+    public void updateVertexData(JsonObject after, SyncEntity syncEntity, Map<String, String> map) {
         String[] pkCol = syncEntity.getRdb_pk_columns().split(",");
         String conditions = "";
         for(int i=0; i<pkCol.length; i++) {
@@ -89,6 +92,16 @@ public class KafkaConsumerService {
         String[] tbColumn = syncEntity.getRdb_columns().split(",");
         String setclaus = "";
         for(int i=0; i<labelProp.length; i++) {
+            /*
+            String afterCol = after.getAsJsonObject().get(tbColumn[i]).getAsString();
+            if(map.get("\"" + tbColumn[i] + "\"") != null) {
+                String val = map.get("\"" + tbColumn[i] + "\"");
+                if(val.contains("Timestamp")) {
+                    afterCol = getTimestampToDate(afterCol);
+                }
+            }
+            */
+
             if(i > 0) {
                 setclaus = setclaus + ", \"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
             } else {
@@ -112,7 +125,7 @@ public class KafkaConsumerService {
         for(int i=0; i<pkCol.length; i++) {
             conditions = conditions + " and properties ->> '" + pkCol[i] + "' = '" + before.getAsJsonObject().get(pkCol[i]) + "'::text";
         }
-
+        
         String graphName = syncEntity.getGraph_name();
         String labelName = syncEntity.getLabel_name();
 
@@ -120,5 +133,13 @@ public class KafkaConsumerService {
             "delete from " + graphName + "." + labelName
             + " where 1 = 1 " + conditions;
         jdbcTemplate.execute(sql);
+    }
+
+    private String getTimestampToDate(String timestampStr) {
+        long timestamp = Long.parseLong(timestampStr);
+        Date date = new java.util.Date(timestamp*1000L);
+        SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        sdf.setTimeZone(java.util.TimeZone.getTimeZone("GMT+9"));
+        return sdf.format(date);
     }
 }
