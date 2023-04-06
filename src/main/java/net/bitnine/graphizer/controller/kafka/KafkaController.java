@@ -28,12 +28,13 @@ public class KafkaController {
 
     @Autowired
     KafkaConsumerService kafkaConsumerService;
-
-    private static final String topicName = "postgres.ag_catalog.tb_sample1";
+    
+    // private static final String topicName = "postgres.ag_catalog.tb_sample1";
+    private static final String topicPattern = "postgres.ag_catalog.*";
     private static final String groupId = "age";
 
     @Deprecated
-    @KafkaListener(topics = topicName, groupId = groupId)
+    @KafkaListener(topicPattern = topicPattern, groupId = groupId)
     public void listen(String message) {
         Gson gson = new Gson();
         JsonObject payloadObj = gson.fromJson(message, JsonObject.class).get("payload").getAsJsonObject();
@@ -43,29 +44,27 @@ public class KafkaController {
 
         try (Connection connection = dataSource.getConnection()) {
             // vertex일 경우와 edge일 경우 다르게 동작
-            try {
-                if (updateType.equals("c")) {
-                    JsonObject after = payloadObj.get("after").getAsJsonObject();
-                    SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
-                    kafkaConsumerService.insertVertexData(after, syncEntity);
-                } else if (updateType.equals("u")) {
-                    JsonArray schemaObj = gson.fromJson(message, JsonObject.class).get("schema").getAsJsonObject().get("fields").getAsJsonArray().get(0).getAsJsonObject().get("fields").getAsJsonArray();
-                    Map<String, String> map = new HashMap<String, String>();
-                    for(int i=0; i<schemaObj.size(); i++) {
-                        if(schemaObj.get(i).getAsJsonObject().get("name") != null) {
-                            map.put(schemaObj.get(i).getAsJsonObject().get("field").toString(), schemaObj.get(i).getAsJsonObject().get("name").toString());
-                        }
+            System.out.println("===== payload =====");
+            System.out.println(gson.fromJson(message, JsonObject.class).get("payload").toString());
+            if (updateType.equals("c")) {
+                JsonObject after = payloadObj.get("after").getAsJsonObject();
+                SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
+                kafkaConsumerService.insertVertexData(after, syncEntity);
+            } else if (updateType.equals("u")) {
+                JsonArray schemaObj = gson.fromJson(message, JsonObject.class).get("schema").getAsJsonObject().get("fields").getAsJsonArray().get(0).getAsJsonObject().get("fields").getAsJsonArray();
+                Map<String, String> map = new HashMap<String, String>();
+                for(int i=0; i<schemaObj.size(); i++) {
+                    if(schemaObj.get(i).getAsJsonObject().get("name") != null) {
+                        map.put(schemaObj.get(i).getAsJsonObject().get("field").toString(), schemaObj.get(i).getAsJsonObject().get("name").toString());
                     }
-                    JsonObject after = payloadObj.get("after").getAsJsonObject();
-                    SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
-                    kafkaConsumerService.updateVertexData(after, syncEntity, map);
-                } else if (updateType.equals("d")) {
-                    JsonObject before = payloadObj.get("before").getAsJsonObject();
-                    SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
-                    kafkaConsumerService.deleteVertexData(before, syncEntity);
                 }
-            } catch (Exception e) {
-                System.out.println(e.getMessage());
+                JsonObject after = payloadObj.get("after").getAsJsonObject();
+                SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
+                kafkaConsumerService.updateVertexData(after, syncEntity, map);
+            } else if (updateType.equals("d")) {
+                JsonObject before = payloadObj.get("before").getAsJsonObject();
+                SyncEntity syncEntity = kafkaConsumerService.syncData(schemaName, tableName);
+                kafkaConsumerService.deleteVertexData(before, syncEntity);
             }
         } catch (Exception e) {
             System.out.println(e.getMessage());
