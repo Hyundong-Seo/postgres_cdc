@@ -21,10 +21,14 @@ public class LabelInfoMapper implements RowMapper<LabelInfoEntity> {
         labelInfoEntity.setGraph_name(rs.getString("graph_name"));
         labelInfoEntity.setStart_label_name(rs.getString("start_label_name"));
         labelInfoEntity.setStart_label_oid(rs.getInt("start_label_oid"));
+        labelInfoEntity.setStart_label_id(rs.getString("start_label_id"));
         labelInfoEntity.setEnd_label_name(rs.getString("end_label_name"));
         labelInfoEntity.setEnd_label_oid(rs.getInt("end_label_oid"));
+        labelInfoEntity.setEnd_label_id(rs.getString("end_label_id"));
         labelInfoEntity.setTarget_label_name(rs.getString("target_label_name"));
         labelInfoEntity.setTarget_label_oid(rs.getInt("target_label_oid"));
+        labelInfoEntity.setTarget_start_label_id(rs.getString("target_start_label_id"));
+        labelInfoEntity.setTarget_end_label_id(rs.getString("target_end_label_id"));
         labelInfoEntity.setTarget_label_properties(rs.getString("target_label_properties"));
         return labelInfoEntity;
     }
