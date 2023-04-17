@@ -1,3 +1,5 @@
+server:
+  port: 8081
 spring:
   datasource:
     driver-class-name: org.postgresql.Driver
@@ -12,6 +14,8 @@ spring:
     generate-ddl: true
     show-sql: true
   kafka:
+    template:
+      default-topic : postgres.ag_catalog.tb_sample1
     consumer:
       bootstrap-servers: localhost:9092
       group-id: age

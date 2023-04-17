@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 
 import com.google.gson.JsonObject;
 
-import net.bitnine.graphizer.model.entity.SyncEntity;
+import net.bitnine.graphizer.model.entity.LabelInfoEntity;
 
 @Service
 public class KafkaConsumerService {
@@ -23,36 +23,41 @@ public class KafkaConsumerService {
     JdbcTemplate jdbcTemplate;
 
     @Deprecated
-    public SyncEntity syncData(String schemaName, String tableName) {
-        String sql = "select rdb_schema, rdb_table_name, rdb_table_oid, rdb_columns, rdb_pk_columns, graph_name, label_name, label_oid, label_properties "
-        + "from tb_vlabel_info "
-        + "where rdb_schema = ? " 
-        + "and rdb_table_name = ?";
+    public LabelInfoEntity labelData(String schemaName, String tableName) {
+        String sql = "select label_type, source_schema, source_table_name, source_table_oid, source_columns, source_pk_columns, graph_name, start_label_name, start_label_oid, end_label_name, end_label_oid, target_label_name, target_label_oid, target_label_properties "
+        + "from tb_label_info "
+        + "where source_schema = ? " 
+        + "and source_table_name = ?";
 
         return jdbcTemplate.queryForObject(sql, new Object[] {schemaName, tableName}, (rs, rowNum) ->
-            new SyncEntity(
-                rs.getString("rdb_schema"),
-                rs.getString("rdb_table_name"),
-                rs.getInt("rdb_table_oid"),
-                rs.getString("rdb_columns"),
-                rs.getString("rdb_pk_columns"),
+            new LabelInfoEntity(
+                rs.getString("label_type"),
+                rs.getString("source_schema"),
+                rs.getString("source_table_name"),
+                rs.getInt("source_table_oid"),
+                rs.getString("source_columns"),
+                rs.getString("source_pk_columns"),
                 rs.getString("graph_name"),
-                rs.getString("label_name"),
-                rs.getInt("label_oid"),
-                rs.getString("label_properties")
+                rs.getString("start_label_name"),
+                rs.getInt("start_label_oid"),
+                rs.getString("end_label_name"),
+                rs.getInt("end_label_oid"),
+                rs.getString("target_label_name"),
+                rs.getInt("target_label_oid"),
+                rs.getString("target_label_properties")
             )
         );
     }
 
     @Deprecated
-    public void insertVertexData(JsonObject after, SyncEntity syncEntity) {
-        String[] pkCol = syncEntity.getRdb_pk_columns().split(",");
+    public void insertVertexData(JsonObject after, LabelInfoEntity labelInfoEntity) {
+        String[] pkCol = labelInfoEntity.getSource_pk_columns().split(",");
         String conditions = "";
         for(int i=0; i<pkCol.length; i++) {
             conditions = conditions + " and " + pkCol[i] + " = " + after.getAsJsonObject().get(pkCol[i]);
         }
 
-        String[] labelProp = syncEntity.getLabel_properties().split(",");
+        String[] labelProp = labelInfoEntity.getTarget_label_properties().split(",");
         String buildmap = "";
         for(int i=0; i<labelProp.length; i++) {
             if(i > 0) {
@@ -61,11 +66,11 @@ public class KafkaConsumerService {
                 buildmap = "'" + labelProp[i] + "', a." + labelProp[i];
             }
         }
-        String graphName = syncEntity.getGraph_name();
-        String labelName = syncEntity.getLabel_name();
-        String colms = syncEntity.getRdb_columns();
-        String rschem = syncEntity.getRdb_schema();
-        String tbname = syncEntity.getRdb_table_name();
+        String graphName = labelInfoEntity.getGraph_name();
+        String labelName = labelInfoEntity.getTarget_label_name();
+        String colms = labelInfoEntity.getSource_columns();
+        String rschem = labelInfoEntity.getSource_schema();
+        String tbname = labelInfoEntity.getSource_table_name();
 
         String sql = 
             "INSERT INTO " + graphName + "." + labelName
@@ -81,15 +86,15 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
-    public void updateVertexData(JsonObject after, SyncEntity syncEntity, Map<String, String> map) {
-        String[] pkCol = syncEntity.getRdb_pk_columns().split(",");
+    public void updateVertexData(JsonObject after, LabelInfoEntity labelInfoEntity, Map<String, String> map) {
+        String[] pkCol = labelInfoEntity.getSource_pk_columns().split(",");
         String conditions = "";
         for(int i=0; i<pkCol.length; i++) {
             conditions = conditions + " and properties ->> '" + pkCol[i] + "' = '" + after.getAsJsonObject().get(pkCol[i]) + "'::text";
         }
 
-        String[] labelProp = syncEntity.getLabel_properties().split(",");
-        String[] tbColumn = syncEntity.getRdb_columns().split(",");
+        String[] labelProp = labelInfoEntity.getTarget_label_properties().split(",");
+        String[] tbColumn = labelInfoEntity.getSource_columns().split(",");
         String setclaus = "";
         for(int i=0; i<labelProp.length; i++) {
             /*
@@ -108,8 +113,8 @@ public class KafkaConsumerService {
                 setclaus = "\"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
             }
         }
-        String graphName = syncEntity.getGraph_name();
-        String labelName = syncEntity.getLabel_name();
+        String graphName = labelInfoEntity.getGraph_name();
+        String labelName = labelInfoEntity.getTarget_label_name();
 
         String sql = 
             "update " + graphName + "." + labelName
@@ -119,15 +124,15 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
-    public void deleteVertexData(JsonObject before, SyncEntity syncEntity) {
-        String[] pkCol = syncEntity.getRdb_pk_columns().split(",");
+    public void deleteVertexData(JsonObject before, LabelInfoEntity labelInfoEntity) {
+        String[] pkCol = labelInfoEntity.getSource_pk_columns().split(",");
         String conditions = "";
         for(int i=0; i<pkCol.length; i++) {
             conditions = conditions + " and properties ->> '" + pkCol[i] + "' = '" + before.getAsJsonObject().get(pkCol[i]) + "'::text";
         }
         
-        String graphName = syncEntity.getGraph_name();
-        String labelName = syncEntity.getLabel_name();
+        String graphName = labelInfoEntity.getGraph_name();
+        String labelName = labelInfoEntity.getTarget_label_name();
 
         String sql = 
             "delete from " + graphName + "." + labelName
