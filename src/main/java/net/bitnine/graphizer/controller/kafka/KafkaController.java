@@ -28,7 +28,7 @@ public class KafkaController {
 
     @Autowired
     KafkaConsumerService kafkaConsumerService;
-    
+
     private static final String topicPattern = "postgres.ag_catalog.*";
     private static final String groupId = "age";
 
@@ -43,7 +43,6 @@ public class KafkaController {
         LabelInfoEntity labelInfoEntity = kafkaConsumerService.labelData(schemaName, tableName);
 
         try (Connection connection = dataSource.getConnection()) {
-            // vertex일 경우와 edge일 경우 다르게 동작
             System.out.println("===== payload =====");
             System.out.println(gson.fromJson(message, JsonObject.class).get("payload").toString());
             if(labelInfoEntity.getLabel_type().equals("v")) {
@@ -67,7 +66,7 @@ public class KafkaController {
             } else if(labelInfoEntity.getLabel_type().equals("e")) {
                 if (updateType.equals("c")) {
                     JsonObject after = payloadObj.get("after").getAsJsonObject();
-                    //kafkaConsumerService.insertEdgeData(after, labelInfoEntity);
+                    kafkaConsumerService.insertEdgeData(after, labelInfoEntity);
                 }
             }
         } catch (Exception e) {
