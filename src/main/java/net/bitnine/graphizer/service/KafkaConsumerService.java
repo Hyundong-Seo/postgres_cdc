@@ -195,6 +195,36 @@ public class KafkaConsumerService {
         jdbcTemplate.execute(sql);
     }
 
+    @Deprecated
+    public void deleteEdgeData(JsonObject before, LabelInfoEntity labelInfoEntity) {
+        String startLb = before.getAsJsonObject().get("start_id").getAsString();
+        String endLb = before.getAsJsonObject().get("end_id").getAsString();
+        String conditions = " and v." + labelInfoEntity.getStart_label_id() + " = " + startLb + " and v2." + labelInfoEntity.getEnd_label_id() + " = " + endLb;
+        
+        String graphName = labelInfoEntity.getGraph_name();
+        String targetLabelName = labelInfoEntity.getTarget_label_name();
+        String startLabelName = labelInfoEntity.getStart_label_name();
+        String endLabelName = labelInfoEntity.getEnd_label_name();
+
+        String sql = 
+            "select * from cypher('" + graphName + "', $$"
+            + "match(v:" + startLabelName + ")-[e:" + targetLabelName + "]->(v2:" + endLabelName + ")"
+            + " where 1 = 1 " + conditions
+            + " detach delete e"
+            + " $$) as (e agtype)";
+        /*
+         * select * from test.acted_in a,
+            person b,
+            movie c
+            where 1=1
+            and a.start_id = b.id
+            and a.end_id = c.id
+            and b.properties ->> 'act_no' = 7::text
+            and c.properties ->> 'movie_no' = 1003::text;
+         */
+        jdbcTemplate.execute(sql);
+    }
+
     private String getTimestampToDate(String timestampStr) {
         long timestamp = Long.parseLong(timestampStr);
         Date date = new java.util.Date(timestamp*1000L);

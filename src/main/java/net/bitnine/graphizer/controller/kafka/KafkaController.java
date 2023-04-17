@@ -67,6 +67,9 @@ public class KafkaController {
                 if (updateType.equals("c")) {
                     JsonObject after = payloadObj.get("after").getAsJsonObject();
                     kafkaConsumerService.insertEdgeData(after, labelInfoEntity);
+                } else if (updateType.equals("d")) {
+                    JsonObject before = payloadObj.get("before").getAsJsonObject();
+                    kafkaConsumerService.deleteEdgeData(before, labelInfoEntity);
                 }
             }
         } catch (Exception e) {
