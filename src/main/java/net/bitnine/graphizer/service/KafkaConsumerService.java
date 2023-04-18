@@ -196,10 +196,58 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
+    public void updateEdgeData(JsonObject after, LabelInfoEntity labelInfoEntity, Map<String, String> map) {
+        String startLb = after.getAsJsonObject().get("start_id").getAsString();
+        String endLb = after.getAsJsonObject().get("end_id").getAsString();
+        String startLabelId = labelInfoEntity.getStart_label_id();
+        String endLabelId = labelInfoEntity.getEnd_label_id();
+        String targetStartLabelId = labelInfoEntity.getTarget_start_label_id();
+        String targetEndLabelId = labelInfoEntity.getTarget_end_label_id();
+        String conditions = " and a." + targetStartLabelId + " = b." + startLabelId
+            + " and a." + targetEndLabelId + " = " + endLabelId
+            + " and b.egid = c.id";
+        
+        String graphName = labelInfoEntity.getGraph_name();
+        String targetLabelName = labelInfoEntity.getTarget_label_name();
+        String sourceSchema = labelInfoEntity.getSource_schema();
+        String sourceTableName = labelInfoEntity.getSource_table_name();
+        String startLabelName = labelInfoEntity.getStart_label_name();
+        String endLabelName = labelInfoEntity.getEnd_label_name();
+
+        String[] labelProp = labelInfoEntity.getTarget_label_properties().split(",");
+        String[] tbColumn = labelInfoEntity.getSource_columns().split(",");
+        String setclaus = "";
+        for(int i=0; i<labelProp.length; i++) {
+            if(i > 0) {
+                setclaus = setclaus + ", \"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
+            } else {
+                setclaus = "\"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
+            }
+        }
+
+        String sql = 
+            "update " + graphName + "." + targetLabelName + " c"
+            + " set properties = concat('{" + setclaus + "}')::agtype"
+            + " from " + sourceSchema + "." + sourceTableName + " a,"
+            + "("
+            + " select * from cypher('" + graphName + "', $$"
+            + " match(v:" + startLabelName + ")-[e:" + targetLabelName + "]->(v2:" + endLabelName + ")"
+            + " where v." + startLabelId + " = " + startLb
+            + " and v2." + endLabelId + " = " + endLb
+            + " return v." + startLabelId + ", id(e), v2." + endLabelId + ""
+            + " $$) as (" + startLabelId + " agtype, egid agtype, " + endLabelId + " agtype)"
+            + ") b"
+            + " where 1 = 1 " + conditions;
+        jdbcTemplate.execute(sql);
+    }
+
+    @Deprecated
     public void deleteEdgeData(JsonObject before, LabelInfoEntity labelInfoEntity) {
         String startLb = before.getAsJsonObject().get("start_id").getAsString();
         String endLb = before.getAsJsonObject().get("end_id").getAsString();
-        String conditions = " and v." + labelInfoEntity.getStart_label_id() + " = " + startLb + " and v2." + labelInfoEntity.getEnd_label_id() + " = " + endLb;
+        String startLabelId = labelInfoEntity.getStart_label_id();
+        String endLabelId = labelInfoEntity.getEnd_label_id();
+        String conditions = " and v." + startLabelId + " = " + startLb + " and v2." + endLabelId + " = " + endLb;
         
         String graphName = labelInfoEntity.getGraph_name();
         String targetLabelName = labelInfoEntity.getTarget_label_name();
