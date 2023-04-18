@@ -43,8 +43,6 @@ public class KafkaController {
         LabelInfoEntity labelInfoEntity = kafkaConsumerService.labelData(schemaName, tableName);
 
         try (Connection connection = dataSource.getConnection()) {
-            System.out.println("===== payload =====");
-            System.out.println(gson.fromJson(message, JsonObject.class).get("payload").toString());
             if(labelInfoEntity.getLabel_type().equals("v")) {
                 if (updateType.equals("c")) {
                     JsonObject after = payloadObj.get("after").getAsJsonObject();
@@ -67,6 +65,16 @@ public class KafkaController {
                 if (updateType.equals("c")) {
                     JsonObject after = payloadObj.get("after").getAsJsonObject();
                     kafkaConsumerService.insertEdgeData(after, labelInfoEntity);
+                } else if (updateType.equals("u")) {
+                    JsonArray schemaObj = gson.fromJson(message, JsonObject.class).get("schema").getAsJsonObject().get("fields").getAsJsonArray().get(0).getAsJsonObject().get("fields").getAsJsonArray();
+                    Map<String, String> map = new HashMap<String, String>();
+                    for(int i=0; i<schemaObj.size(); i++) {
+                        if(schemaObj.get(i).getAsJsonObject().get("name") != null) {
+                            map.put(schemaObj.get(i).getAsJsonObject().get("field").toString(), schemaObj.get(i).getAsJsonObject().get("name").toString());
+                        }
+                    }
+                    JsonObject after = payloadObj.get("after").getAsJsonObject();
+                    kafkaConsumerService.updateEdgeData(after, labelInfoEntity, map);
                 } else if (updateType.equals("d")) {
                     JsonObject before = payloadObj.get("before").getAsJsonObject();
                     kafkaConsumerService.deleteEdgeData(before, labelInfoEntity);
