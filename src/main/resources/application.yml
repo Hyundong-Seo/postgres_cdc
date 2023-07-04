@@ -15,7 +15,7 @@ spring:
     show-sql: true
   kafka:
     template:
-      default-topic : postgres.ag_catalog.tb_sample1
+      default-topic : postgres.ag_catalog.*
     consumer:
       bootstrap-servers: localhost:9092
       group-id: age

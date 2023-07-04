@@ -1,6 +1,5 @@
 package net.bitnine.graphizer.controller.kafka;
 
-import java.sql.Connection;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -15,7 +14,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
-import net.bitnine.graphizer.model.entity.LabelInfoEntity;
 import net.bitnine.graphizer.service.KafkaConsumerService;
 
 @Controller
@@ -30,7 +28,8 @@ public class KafkaController {
     KafkaConsumerService kafkaConsumerService;
 
     private static final String topicPattern = "postgres.ag_catalog.*";
-    private static final String groupId = "age";
+    // private static final String topicPattern = "postgres.*";
+    private static final String groupId = "grp_age";
 
     @Deprecated
     @KafkaListener(topicPattern = topicPattern, groupId = groupId)
@@ -40,48 +39,27 @@ public class KafkaController {
         String schemaName = payloadObj.get("source").getAsJsonObject().get("schema").getAsString();
         String tableName = payloadObj.get("source").getAsJsonObject().get("table").getAsString();
         String updateType = payloadObj.get("op").getAsString();
-        LabelInfoEntity labelInfoEntity = kafkaConsumerService.labelData(schemaName, tableName);
 
-        try (Connection connection = dataSource.getConnection()) {
-            if(labelInfoEntity.getLabel_type().equals("v")) {
-                if (updateType.equals("c")) {
-                    JsonObject after = payloadObj.get("after").getAsJsonObject();
-                    kafkaConsumerService.insertVertexData(after, labelInfoEntity);
-                } else if (updateType.equals("u")) {
-                    JsonArray schemaObj = gson.fromJson(message, JsonObject.class).get("schema").getAsJsonObject().get("fields").getAsJsonArray().get(0).getAsJsonObject().get("fields").getAsJsonArray();
-                    Map<String, String> map = new HashMap<String, String>();
-                    for(int i=0; i<schemaObj.size(); i++) {
-                        if(schemaObj.get(i).getAsJsonObject().get("name") != null) {
-                            map.put(schemaObj.get(i).getAsJsonObject().get("field").toString(), schemaObj.get(i).getAsJsonObject().get("name").toString());
-                        }
-                    }
-                    JsonObject after = payloadObj.get("after").getAsJsonObject();
-                    kafkaConsumerService.updateVertexData(after, labelInfoEntity, map);
-                } else if (updateType.equals("d")) {
-                    JsonObject before = payloadObj.get("before").getAsJsonObject();
-                    kafkaConsumerService.deleteVertexData(before, labelInfoEntity);
-                }
-            } else if(labelInfoEntity.getLabel_type().equals("e")) {
-                if (updateType.equals("c")) {
-                    JsonObject after = payloadObj.get("after").getAsJsonObject();
-                    kafkaConsumerService.insertEdgeData(after, labelInfoEntity);
-                } else if (updateType.equals("u")) {
-                    JsonArray schemaObj = gson.fromJson(message, JsonObject.class).get("schema").getAsJsonObject().get("fields").getAsJsonArray().get(0).getAsJsonObject().get("fields").getAsJsonArray();
-                    Map<String, String> map = new HashMap<String, String>();
-                    for(int i=0; i<schemaObj.size(); i++) {
-                        if(schemaObj.get(i).getAsJsonObject().get("name") != null) {
-                            map.put(schemaObj.get(i).getAsJsonObject().get("field").toString(), schemaObj.get(i).getAsJsonObject().get("name").toString());
-                        }
-                    }
-                    JsonObject after = payloadObj.get("after").getAsJsonObject();
-                    kafkaConsumerService.updateEdgeData(after, labelInfoEntity, map);
-                } else if (updateType.equals("d")) {
-                    JsonObject before = payloadObj.get("before").getAsJsonObject();
-                    kafkaConsumerService.deleteEdgeData(before, labelInfoEntity);
+        // updateType을 기준으로 c / u / d로 나누어서 진행
+        // V, E인지는 service에서 진행
+        // 그렇게되면 labelData는 필요없고 서비스에서 한번에 진행
+        if (updateType.equals("c")
+                && (tableName != "tb_source_info" || tableName != "tb_column_info" || tableName != "tb_property_info" || tableName != "tb_meta_info" || tableName != "tb_label_info")) {
+            JsonObject after = payloadObj.get("after").getAsJsonObject();
+            kafkaConsumerService.insertData(after, schemaName, tableName);
+        } else if (updateType.equals("u")) {
+            JsonArray schemaObj = gson.fromJson(message, JsonObject.class).get("schema").getAsJsonObject().get("fields").getAsJsonArray().get(0).getAsJsonObject().get("fields").getAsJsonArray();
+            Map<String, String> map = new HashMap<String, String>();
+            for(int i=0; i<schemaObj.size(); i++) {
+                if(schemaObj.get(i).getAsJsonObject().get("name") != null) {
+                    map.put(schemaObj.get(i).getAsJsonObject().get("field").toString(), schemaObj.get(i).getAsJsonObject().get("name").toString());
                 }
             }
-        } catch (Exception e) {
-            System.out.println(e.getMessage());
+            JsonObject after = payloadObj.get("after").getAsJsonObject();
+            kafkaConsumerService.updateData(after, map, schemaName, tableName);
+        } else if (updateType.equals("d")) {
+            JsonObject before = payloadObj.get("before").getAsJsonObject();
+            kafkaConsumerService.deleteData(before, schemaName, tableName);
         }
     }
 }
