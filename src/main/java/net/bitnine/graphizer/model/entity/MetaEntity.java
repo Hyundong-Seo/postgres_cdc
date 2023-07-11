@@ -13,7 +13,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @Builder
-public class InsertMetaEntity implements Serializable {
+public class MetaEntity implements Serializable {
     @Id
     private long meta_id;
     @Id
@@ -27,11 +27,11 @@ public class InsertMetaEntity implements Serializable {
     @Id
     private String property_data;
 
-    public InsertMetaEntity() {
+    public MetaEntity() {
 	}
     
     @Builder
-    public InsertMetaEntity(long meta_id, String meta_schema_name, String meta_table_name, String meta_data, String mapped_data, String property_data) {
+    public MetaEntity(long meta_id, String meta_schema_name, String meta_table_name, String meta_data, String mapped_data, String property_data) {
 		this.meta_id = meta_id;
         this.meta_schema_name = meta_schema_name;
 		this.meta_table_name = meta_table_name;
