@@ -40,8 +40,8 @@ public class KafkaConsumerService {
     @Autowired
     JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private TransactionTemplate transactionTemplate;
+    // @Autowired
+    // private TransactionTemplate transactionTemplate;
     // Todo
     // auto commit false로 하고 아래 쿼리들 진행
     // 1. spring.datasource.hikari.auto-commit: false
@@ -91,7 +91,10 @@ public class KafkaConsumerService {
             for(int i=0; i<metaEntityList.size(); i++) {
                 String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
                 String pkColumn = metaData[2];
-                String[] mappedData = metaEntityList.get(i).getMapped_data().split("!");
+                String[] mappedData = {};
+                if(!"".equals(metaEntityList.get(i).getMapped_data().toString())) {
+                    mappedData = metaEntityList.get(i).getMapped_data().split("!");
+                }
                 String[] mappedDataDetail = {};
                 String[] propertyData = metaEntityList.get(i).getProperty_data().split(",");
 
@@ -135,45 +138,43 @@ public class KafkaConsumerService {
                     + " WHERE a." + metaData[2] + " = " + after.getAsJsonObject().get(metaData[2]).getAsString() + "::text";
                 try {
                     jdbcTemplate.execute(insertForMetaSql);
-
-                    InsertVertexEntity insertVertexEntity = insertVertexQuery(metaEntityList.get(i).getMeta_id());
-                    if(insertVertexEntity != null) {
-                        String graphName = insertVertexEntity.getGraph_name();
-                        String labelName = insertVertexEntity.getTarget_label_name();
-                        String[] colms = insertVertexEntity.getSource_column_name().split(",");
-                        String[] pops = insertVertexEntity.getProperty_name().split(",");
-
-                        String conditions = " AND " + insertVertexEntity.getMeta_pk_column() + " = " + after.getAsJsonObject().get(pkColumn).getAsString() + "::text";
-
-                        String buildmap = "";
-                        for(int j=0; j<pops.length; j++) {
-                            if(j > 0) {
-                                buildmap = buildmap + ", '" + pops[j] + "', a." + colms[j];
-                            } else {
-                                buildmap = "'" + pops[j] + "', a." + pops[j];
-                            }
-                        }
-
-                        String insertSql = 
-                            "INSERT INTO " + graphName + "." + labelName
-                            + " SELECT _graphid((_label_id('" + graphName + "'::name, '" + labelName + "'::name))::integer, nextval('" + graphName + "." + labelName + "_id_seq'::regclass)), "
-                            + "     agtype_build_map ("+ buildmap +") "
-                            + "FROM "
-                            + "( "
-                            + "     SELECT " + insertVertexEntity.getProperty_name().toString()
-                            + "     FROM  " + metaSchema + "." + metaTable
-                            + "     WHERE 1 = 1 " + conditions
-                            + ") AS a;";
-                        try {
-                            jdbcTemplate.execute(insertSql);
-                            jdbcTemplate.getDataSource().getConnection().commit();
-                        } catch(Exception e) {
-                            jdbcTemplate.getDataSource().getConnection().rollback();
-                            System.out.println(e.getMessage());
-                        }
-                    }
                 } catch(Exception e) {
                     System.out.println(e.getMessage());
+                }
+
+                InsertVertexEntity insertVertexEntity = insertVertexQuery(metaEntityList.get(i).getMeta_id());
+                if(insertVertexEntity != null) {
+                    String graphName = insertVertexEntity.getGraph_name();
+                    String labelName = insertVertexEntity.getTarget_label_name();
+                    String[] colms = insertVertexEntity.getSource_column_name().split(",");
+                    String[] pops = insertVertexEntity.getProperty_name().split(",");
+
+                    String conditions = " AND " + insertVertexEntity.getMeta_pk_column() + " = " + after.getAsJsonObject().get(pkColumn).getAsString() + "::text";
+
+                    String buildmap = "";
+                    for(int j=0; j<pops.length; j++) {
+                        if(j > 0) {
+                            buildmap = buildmap + ", '" + pops[j] + "', a." + colms[j];
+                        } else {
+                            buildmap = "'" + pops[j] + "', a." + pops[j];
+                        }
+                    }
+
+                    String insertSql = 
+                        "INSERT INTO " + graphName + "." + labelName
+                        + " SELECT _graphid((_label_id('" + graphName + "'::name, '" + labelName + "'::name))::integer, nextval('" + graphName + "." + labelName + "_id_seq'::regclass)), "
+                        + "     agtype_build_map ("+ buildmap +") "
+                        + "FROM "
+                        + "( "
+                        + "     SELECT " + insertVertexEntity.getProperty_name().toString()
+                        + "     FROM  " + metaSchema + "." + metaTable
+                        + "     WHERE 1 = 1 " + conditions
+                        + ") AS a;";
+                    try {
+                        jdbcTemplate.execute(insertSql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
                 }
             }
         }
@@ -182,7 +183,7 @@ public class KafkaConsumerService {
     @Deprecated
     private List<MetaEntity> selectMetaQuery(String schemaName, String tableName) {
         try {
-            String sql = " WITH sc AS ("
+            String sql = "WITH sc AS ("
                 + "     SELECT si.meta_id"
                 + "     FROM tb_column_info ci"
                 + "     JOIN tb_source_info si ON ci.column_id = si.column_id"
@@ -190,51 +191,47 @@ public class KafkaConsumerService {
                 + "     AND ci.table_name = ?"
                 + "     GROUP BY si.meta_id"
                 + " ), tb AS ("
-                + " 	SELECT sc.meta_id, ci.schema_name AS meta_key_schema_name, ci.table_name AS meta_key_table_name"
-                + " 	FROM tb_meta_info mi"
-                + " 	JOIN tb_source_info si ON si.meta_id = mi.meta_id"
-                + " 	JOIN tb_column_info ci ON ci.column_id = si.column_id"
-                + " 	JOIN sc ON sc.meta_id = mi.meta_id AND sc.meta_id = si.meta_id"
-                + " 	WHERE si.meta_key_yn = 'Y'"
-                + " 	AND mi.use_yn = 'Y'"
-                + " 	GROUP BY sc.meta_id, meta_key_schema_name, meta_key_table_name"
+                + "     SELECT sc.meta_id, ci.schema_name AS meta_key_schema_name, ci.table_name AS meta_key_table_name"
+                + "     FROM tb_meta_info mi"
+                + "     JOIN tb_source_info si ON si.meta_id = mi.meta_id"
+                + "     JOIN tb_column_info ci ON ci.column_id = si.column_id"
+                + "     JOIN sc ON sc.meta_id = mi.meta_id AND sc.meta_id = si.meta_id"
+                + "     WHERE si.meta_key_yn = 'Y'"
+                + "     AND mi.use_yn = 'Y'"
+                + "     GROUP BY sc.meta_id, meta_key_schema_name, meta_key_table_name"
                 + " ), mt AS ("
-                + " 	SELECT a.meta_id, a.meta_schema_name, a.meta_table_name, a.meta_key_schema_name, a.meta_key_table_name, a.meta_key_schema_name || ',' || a.meta_key_table_name || ',' || a.meta_pk_column_name || ',' || string_agg(a.column_name, ',') AS meta_data, (select pi.property_name from tb_property_info pi join tb_source_info si on pi.source_id = si.source_id join tb_column_info ci on ci.column_id = si.column_id where si.meta_id = a.meta_id and si.meta_key_yn = 'Y') || ',' || string_agg(a.property_name, ',') AS property_data"
-                + " 	FROM ("
-                + " 	    SELECT mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name AS meta_key_schema_name, ci.table_name AS meta_key_table_name, (SELECT column_name FROM tb_column_info WHERE column_id = si.source_pk_column_id) AS meta_pk_column_name, ci.column_name, pi.property_name"
-                + " 	    FROM tb_meta_info mi"
-                + " 	    JOIN tb_source_info si ON si.meta_id = mi.meta_id"
-                + " 	    JOIN tb_column_info ci ON ci.column_id = si.column_id"
-                + " 	    JOIN tb_property_info pi ON pi.source_id = si.source_id"
-                + " 	    JOIN sc ON sc.meta_id = mi.meta_id"
-                + " 	    JOIN tb ON tb.meta_key_schema_name = ci.schema_name AND tb.meta_key_table_name = ci.table_name"
-                + " 	    WHERE mi.use_yn = 'Y'"
-                + " 	    GROUP BY mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name, ci.table_name, meta_pk_column_name, ci.column_name, pi.property_name"
-                + " 	) a"
-                + " 	GROUP BY a.meta_id, a.meta_schema_name, a.meta_table_name, a.meta_key_schema_name, a.meta_key_table_name, a.meta_pk_column_name"
-                + " ), mp AS ("
-                + " 	SELECT b.meta_id, b.meta_schema_name, b.meta_table_name, string_agg(b.mapped_data, '!') AS mapped_data, CASE WHEN mt.property_data != '' THEN mt.property_data || ',' || string_agg(b.property_name, ',') ELSE string_agg(b.property_name, ',') END AS property_data"
-                + " 	FROM ("
-                + " 		SELECT a.meta_id, a.meta_schema_name, a.meta_table_name, a.mapped_key_schema_name || ',' || a.mapped_key_table_name || ',' || a.mapped_pk_column_name || ',' || string_agg(a.column_name, ',') AS mapped_data, a.property_name"
-                + " 		FROM ("
-                + " 		    SELECT mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name AS mapped_key_schema_name, ci.table_name AS mapped_key_table_name, (SELECT column_name FROM tb_column_info WHERE column_id = si.source_pk_column_id) AS mapped_pk_column_name, ci.column_name, pi.property_name"
-                + " 		    FROM tb_meta_info mi"
-                + " 		    JOIN tb_source_info si ON si.meta_id = mi.meta_id"
-                + " 		    JOIN tb_column_info ci ON ci.column_id = si.column_id"
-                + " 		    JOIN tb_property_info pi ON pi.source_id = si.source_id"
-                + " 		    JOIN sc ON sc.meta_id = mi.meta_id"
-                + " 		    JOIN tb ON (tb.meta_key_schema_name <> ci.schema_name or tb.meta_key_table_name <> ci.table_name) AND tb.meta_id = sc.meta_id"
-                + " 		    WHERE mi.use_yn = 'Y'"
-                + " 		    GROUP BY mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name, ci.table_name, mapped_pk_column_name, ci.column_name, pi.property_name"
-                + " 		) a"
-                + " 		GROUP BY a.meta_id, a.meta_schema_name, a.meta_table_name, a.mapped_key_schema_name, a.mapped_key_table_name, a.mapped_pk_column_name, a.property_name"
-                + " 	) b"
-                + " 	JOIN mt ON mt.meta_id = b.meta_id"
-                + " 	GROUP BY b.meta_id, b.meta_schema_name, b.meta_table_name, mt.property_data"
+                + "     SELECT a.meta_id, a.meta_schema_name, a.meta_table_name, a.meta_key_schema_name, a.meta_key_table_name, a.meta_key_schema_name || ',' || a.meta_key_table_name || ',' || a.meta_pk_column_name || ',' || string_agg(a.column_name, ',') AS meta_data, (select pi.property_name from tb_property_info pi join tb_source_info si on pi.source_id = si.source_id join tb_column_info ci on ci.column_id = si.column_id where si.meta_id = a.meta_id and si.meta_key_yn = 'Y') || ',' || string_agg(a.property_name, ',') AS property_data"
+                + "     FROM ("
+                + "         SELECT mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name AS meta_key_schema_name, ci.table_name AS meta_key_table_name, (SELECT column_name FROM tb_column_info WHERE column_id = si.source_pk_column_id) AS meta_pk_column_name, ci.column_name, pi.property_name"
+                + "         FROM tb_meta_info mi"
+                + "         JOIN tb_source_info si ON si.meta_id = mi.meta_id"
+                + "         JOIN tb_column_info ci ON ci.column_id = si.column_id"
+                + "         JOIN tb_property_info pi ON pi.source_id = si.source_id"
+                + "         JOIN sc ON sc.meta_id = mi.meta_id"
+                + "         JOIN tb ON tb.meta_key_schema_name = ci.schema_name AND tb.meta_key_table_name = ci.table_name"
+                + "         WHERE mi.use_yn = 'Y'"
+                + "         GROUP BY mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name, ci.table_name, meta_pk_column_name, ci.column_name, pi.property_name"
+                + "     ) a"
+                + "     GROUP BY a.meta_id, a.meta_schema_name, a.meta_table_name, a.meta_key_schema_name, a.meta_key_table_name, a.meta_pk_column_name"
                 + " )"
-                + " SELECT mt.meta_id, mt.meta_schema_name, mt.meta_table_name, mt.meta_data, mp.mapped_data, mp.property_data"
-                + " FROM mt"
-                + " JOIN mp ON mt.meta_id = mp.meta_id";
+                + " SELECT mt.meta_id, mt.meta_schema_name, mt.meta_table_name, mt.meta_data, CASE WHEN string_agg(b.mapped_data, '!') != '' THEN string_agg(b.mapped_data, '!') ELSE '' END AS mapped_data, CASE WHEN mt.property_data != '' and string_agg(b.property_name, ',') is not null THEN mt.property_data || ',' || string_agg(b.property_name, ',') ELSE mt.property_data END AS property_data"
+                + " FROM ("
+                + "     SELECT a.meta_id, a.meta_schema_name, a.meta_table_name, a.mapped_key_schema_name || ',' || a.mapped_key_table_name || ',' || a.mapped_pk_column_name || ',' || string_agg(a.column_name, ',') AS mapped_data, a.property_name"
+                + "     FROM ("
+                + "         SELECT mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name AS mapped_key_schema_name, ci.table_name AS mapped_key_table_name, (SELECT column_name FROM tb_column_info WHERE column_id = si.source_pk_column_id) AS mapped_pk_column_name, ci.column_name, pi.property_name"
+                + "         FROM tb_meta_info mi"
+                + "         JOIN tb_source_info si ON si.meta_id = mi.meta_id"
+                + "         JOIN tb_column_info ci ON ci.column_id = si.column_id"
+                + "         JOIN tb_property_info pi ON pi.source_id = si.source_id"
+                + "         JOIN sc ON sc.meta_id = mi.meta_id"
+                + "         JOIN tb ON (tb.meta_key_schema_name <> ci.schema_name or tb.meta_key_table_name <> ci.table_name) AND tb.meta_id = sc.meta_id"
+                + "         WHERE mi.use_yn = 'Y'"
+                + "         GROUP BY mi.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name, ci.table_name, mapped_pk_column_name, ci.column_name, pi.property_name"
+                + "     ) a"
+                + "     GROUP BY a.meta_id, a.meta_schema_name, a.meta_table_name, a.mapped_key_schema_name, a.mapped_key_table_name, a.mapped_pk_column_name, a.property_name"
+                + " ) b"
+                + " right JOIN mt ON mt.meta_id = b.meta_id"
+                + " GROUP BY mt.meta_id, mt.meta_schema_name, mt.meta_table_name, mt.meta_data, mt.property_data, mt.property_data";
             
             return jdbcTemplate.query(sql, new Object[] {schemaName, tableName}, (rs, rowNum) ->
                 new MetaEntity(
@@ -345,41 +342,41 @@ public class KafkaConsumerService {
                     + " WHERE a." + propertyData[0] + " = " + after.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
                 try {
                     jdbcTemplate.execute(updateForMetaSql);
-
-                    UpdateVertexEntity updateVertexEntity = updateVertexQuery(metaEntityList.get(i).getMeta_id());
-                    if(updateVertexEntity != null) {
-                        String graphName = updateVertexEntity.getGraph_name();
-                        String labelName = updateVertexEntity.getTarget_label_name();
-                        String keyProperty = updateVertexEntity.getKey_property();
-                        String conditions = " AND properties ->> '" + keyProperty + "' = '" + sourcePkValue + "'::text";
-
-                        String vertexValue = updateVertexValueQuery(metaEntityList.get(i).getMeta_id(), metaSchema, metaTable, keyProperty, sourcePkValue);
-                        JsonParser parser = new JsonParser();
-                        JsonObject jobj = (JsonObject)parser.parse(vertexValue);
-                        Iterator<String> iterator = jobj.keySet().iterator();
-                        String setGraphClause = "";
-                        while (iterator.hasNext()) {
-                            String key = iterator.next();
-                            String value = jobj.get(key).getAsString();
-                            if("".equals(setGraphClause)) {
-                                setGraphClause = "\"" + key + "\":\"" + value + "\"";
-                            } else {
-                                setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
-                            }
-                        }
-
-                        String updateSql = 
-                            "UPDATE " + graphName + "." + labelName
-                            + " SET properties = '{" + setGraphClause + "}'"
-                            + " WHERE 1 = 1 " + conditions;
-                        try {
-                            jdbcTemplate.execute(updateSql);
-                        } catch(Exception e) {
-                            System.out.println(e.getMessage());
-                        }
-                    }
                 } catch(Exception e) {
                     System.out.println(e.getMessage());
+                }
+
+                UpdateVertexEntity updateVertexEntity = updateVertexQuery(metaEntityList.get(i).getMeta_id());
+                if(updateVertexEntity != null) {
+                    String graphName = updateVertexEntity.getGraph_name();
+                    String labelName = updateVertexEntity.getTarget_label_name();
+                    String keyProperty = updateVertexEntity.getKey_property();
+                    String conditions = " AND properties ->> '" + keyProperty + "' = '" + sourcePkValue + "'::text";
+
+                    String vertexValue = updateVertexValueQuery(metaEntityList.get(i).getMeta_id(), metaSchema, metaTable, keyProperty, sourcePkValue);
+                    JsonParser parser = new JsonParser();
+                    JsonObject jobj = (JsonObject)parser.parse(vertexValue);
+                    Iterator<String> iterator = jobj.keySet().iterator();
+                    String setGraphClause = "";
+                    while (iterator.hasNext()) {
+                        String key = iterator.next();
+                        String value = jobj.get(key).getAsString();
+                        if("".equals(setGraphClause)) {
+                            setGraphClause = "\"" + key + "\":\"" + value + "\"";
+                        } else {
+                            setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
+                        }
+                    }
+
+                    String updateSql = 
+                        "UPDATE " + graphName + "." + labelName
+                        + " SET properties = '{" + setGraphClause + "}'"
+                        + " WHERE 1 = 1 " + conditions;
+                    try {
+                        jdbcTemplate.execute(updateSql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
                 }
             }
         }
@@ -448,25 +445,25 @@ public class KafkaConsumerService {
                     + " WHERE " + propertyData[0] + " = " + before.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
                 try {
                     jdbcTemplate.execute(deleteForMetaSql);
-
-                    DeleteVertexEntity deleteVertexEntity = deleteVertexQuery(metaEntityList.get(i).getMeta_id());
-                    if(deleteVertexEntity != null) {
-                        String metaPkColumn = deleteVertexEntity.getMeta_pk_column();
-                        String conditions = " AND properties ->> '" + metaPkColumn + "' = '" + sourcePkValue + "'::text";
-                        
-                        String graphName = deleteVertexEntity.getGraph_name();
-                        String labelName = deleteVertexEntity.getTarget_label_name();
-
-                        String sql = "DELETE FROM " + graphName + "." + labelName
-                            + " WHERE 1 = 1 " + conditions;
-                        try {
-                            jdbcTemplate.execute(sql);
-                        } catch(Exception e) {
-                            System.out.println(e.getMessage());
-                        }
-                    }
                 } catch(Exception e) {
                     System.out.println(e.getMessage());
+                }
+
+                DeleteVertexEntity deleteVertexEntity = deleteVertexQuery(metaEntityList.get(i).getMeta_id());
+                if(deleteVertexEntity != null) {
+                    String metaPkColumn = deleteVertexEntity.getMeta_pk_column();
+                    String conditions = " AND properties ->> '" + metaPkColumn + "' = '" + sourcePkValue + "'::text";
+                    
+                    String graphName = deleteVertexEntity.getGraph_name();
+                    String labelName = deleteVertexEntity.getTarget_label_name();
+
+                    String sql = "DELETE FROM " + graphName + "." + labelName
+                        + " WHERE 1 = 1 " + conditions;
+                    try {
+                        jdbcTemplate.execute(sql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
                 }
             }
         }
