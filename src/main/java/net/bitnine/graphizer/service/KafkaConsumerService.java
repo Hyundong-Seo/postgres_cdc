@@ -26,6 +26,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import net.bitnine.graphizer.model.entity.DeleteVertexEntity;
 import net.bitnine.graphizer.model.entity.InsertVertexEntity;
 import net.bitnine.graphizer.model.entity.UpdateVertexEntity;
 import net.bitnine.graphizer.model.entity.MetaEntity;
@@ -422,107 +423,78 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
-    public void deleteData(JsonObject after, String schemaName, String tableName) {
+    public void deleteData(JsonObject before, String schemaName, String tableName) {
+        List<MetaEntity> metaEntityList = selectMetaQuery(schemaName, tableName);
+        if(metaEntityList.size() > 0) {
+            for(int i=0; i<metaEntityList.size(); i++) {
+                String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
+                String sourcePkColumn = metaData[2];
+                String sourcePkValue = before.getAsJsonObject().get(sourcePkColumn).getAsString();
+                String[] propertyData = metaEntityList.get(i).getProperty_data().split(",");
+                
+                String metaSchema = metaEntityList.get(i).getMeta_schema_name();
+                String metaTable = metaEntityList.get(i).getMeta_table_name();
+                String deleteForMetaSql = "DELETE FROM " + metaSchema + "." + metaTable
+                    + " WHERE " + propertyData[0] + " = " + before.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
+                try {
+                    jdbcTemplate.execute(deleteForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
 
-    }
+                DeleteVertexEntity deleteVertexEntity = deleteVertexQuery(metaEntityList.get(i).getMeta_id());
+                if(deleteVertexEntity != null) {
+                    String metaPkColumn = deleteVertexEntity.getMeta_pk_column();
+                    String conditions = " AND properties ->> '" + metaPkColumn + "' = '" + sourcePkValue + "'::text";
+                    
+                    String graphName = deleteVertexEntity.getGraph_name();
+                    String labelName = deleteVertexEntity.getTarget_label_name();
 
-    /*
-    @Deprecated
-    public void insertVertexData(JsonObject after, ColumnInfoEntity columnInfoEntity) {
-        String[] pkCol = columnInfoEntity.getSource_pk_columns().split(",");
-        String conditions = "";
-        for(int i=0; i<pkCol.length; i++) {
-            conditions = conditions + " AND " + pkCol[i] + " = " + after.getAsJsonObject().get(pkCol[i]);
-        }
-
-        String[] labelProp = columnInfoEntity.getTarget_label_properties().split(",");
-        String buildmap = "";
-        for(int i=0; i<labelProp.length; i++) {
-            if(i > 0) {
-                buildmap = buildmap + ", '" + labelProp[i] + "', a." + labelProp[i];
-            } else {
-                buildmap = "'" + labelProp[i] + "', a." + labelProp[i];
-            }
-        }
-        String graphName = labelInfoEntity.getGraph_name();
-        String labelName = labelInfoEntity.getTarget_label_name();
-        String colms = labelInfoEntity.getSource_columns();
-        String rschem = labelInfoEntity.getSource_schema();
-        String tbname = labelInfoEntity.getSource_table_name();
-
-        String sql = 
-            "INSERT INTO " + graphName + "." + labelName
-            + " SELECT _graphid((_label_id('" + graphName + "'::name, '" + labelName + "'::name))::integer, nextval('" + graphName + "." + labelName + "_id_seq'::regclass)), "
-            + "        agtype_build_map ("+ buildmap +") "
-            + "FROM "
-            + "( "
-            + "        SELECT "+ colms
-            + "        FROM  "+ rschem +"."+ tbname
-            + "        WHERE 1 = 1 " + conditions
-            + ") AS a;";
-        jdbcTemplate.execute(sql);
-    }
-    */
-
-    /*
-    @Deprecated
-    public void updateVertexData(JsonObject after, ColumnInfoEntity columnInfoEntity, Map<String, String> map) {
-        String[] pkCol = labelInfoEntity.getSource_pk_columns().split(",");
-        String conditions = "";
-        for(int i=0; i<pkCol.length; i++) {
-            conditions = conditions + " AND properties ->> '" + pkCol[i] + "' = '" + after.getAsJsonObject().get(pkCol[i]) + "'::text";
-        }
-
-        String[] labelProp = labelInfoEntity.getTarget_label_properties().split(",");
-        String[] tbColumn = labelInfoEntity.getSource_columns().split(",");
-        String setclaus = "";
-        for(int i=0; i<labelProp.length; i++) {
-             */
-            /* Todo timestamp같이 age에 없는 데이터 타입 변경해야 함
-            String afterCol = after.getAsJsonObject().get(tbColumn[i]).getAsString();
-            if(map.get("\"" + tbColumn[i] + "\"") != null) {
-                String val = map.get("\"" + tbColumn[i] + "\"");
-                if(val.contains("Timestamp")) {
-                    afterCol = getTimestampToDate(afterCol);
+                    String sql = "DELETE FROM " + graphName + "." + labelName
+                        + " WHERE 1 = 1 " + conditions;
+                    try {
+                        jdbcTemplate.execute(sql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
                 }
             }
-            */
-/*
-            if(i > 0) {
-                setclaus = setclaus + ", \"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
-            } else {
-                setclaus = "\"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
-            }
         }
-        String graphName = labelInfoEntity.getGraph_name();
-        String labelName = labelInfoEntity.getTarget_label_name();
-
-        String sql = 
-            "update " + graphName + "." + labelName
-            + " set properties = '{" + setclaus + "}'"
-            + " WHERE 1 = 1 " + conditions;
-        jdbcTemplate.execute(sql);
     }
-    */
 
-    /*
     @Deprecated
-    public void deleteVertexData(JsonObject before, ColumnInfoEntity columnInfoEntity) {
-        String[] pkCol = labelInfoEntity.getSource_pk_columns().split(",");
-        String conditions = "";
-        for(int i=0; i<pkCol.length; i++) {
-            conditions = conditions + " AND properties ->> '" + pkCol[i] + "' = '" + before.getAsJsonObject().get(pkCol[i]) + "'::text";
+    private DeleteVertexEntity deleteVertexQuery(long meta_id) {
+        try {
+            String sql = "WITH pk AS ("
+                + " SELECT li.label_id, pi.property_name AS meta_pk_column"
+                + " FROM tb_label_info li"
+                + " JOIN tb_property_info pi ON pi.label_id = li.label_id"
+                + " JOIN tb_source_info si ON si.source_id = pi.source_id"
+                + " WHERE li.meta_id = ?"
+                + " AND li.use_yn = 'Y'"
+                + " AND si.meta_key_yn = 'Y'"
+                + " GROUP BY li.label_id, pi.property_name"
+                + " )"
+                + " SELECT li.label_id, li.label_type, li.graph_name, li.target_label_name, pk.meta_pk_column"
+                + " FROM tb_label_info li"
+                + " JOIN tb_property_info pi ON pi.label_id = li.label_id"
+                + " JOIN pk ON pk.label_id = li.label_id"
+                + " GROUP BY li.label_id, li.label_type, li.graph_name, li.target_label_name, pk.meta_pk_column";
+            
+            return jdbcTemplate.queryForObject(sql, new Object[] {meta_id}, (rs, rowNum) ->
+                new DeleteVertexEntity(
+                    rs.getLong("label_id"),
+                    rs.getString("label_type"),
+                    rs.getString("graph_name"),
+                    rs.getString("target_label_name"),
+                    rs.getString("meta_pk_column")
+                )
+            );
+        } catch(Exception e) {
+            System.out.println(e.getMessage());
+            return null;
         }
-        
-        String graphName = labelInfoEntity.getGraph_name();
-        String labelName = labelInfoEntity.getTarget_label_name();
-
-        String sql = 
-            "delete from " + graphName + "." + labelName
-            + " WHERE 1 = 1 " + conditions;
-        jdbcTemplate.execute(sql);
     }
-    */
 
     /*
     @Deprecated
