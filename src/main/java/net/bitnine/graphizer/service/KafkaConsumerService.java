@@ -1,19 +1,33 @@
 package net.bitnine.graphizer.service;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.Collectors;
 
 import javax.sql.DataSource;
 
+import org.apache.tomcat.util.json.JSONParser;
+import org.h2.util.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 import net.bitnine.graphizer.model.entity.InsertVertexEntity;
+import net.bitnine.graphizer.model.entity.UpdateVertexEntity;
 import net.bitnine.graphizer.model.entity.MetaEntity;
 
 @Service
@@ -270,33 +284,46 @@ public class KafkaConsumerService {
         if(metaEntityList.size() > 0) {
             for(int i=0; i<metaEntityList.size(); i++) {
                 String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
-                String pkColumn = metaData[2];
+                String sourcePkColumn = metaData[2];
+                String sourcePkValue = after.getAsJsonObject().get(sourcePkColumn).getAsString();
                 String[] mappedData = metaEntityList.get(i).getMapped_data().toString().split("!");
                 String[] mappedDataDetail = {};
                 String[] propertyData = metaEntityList.get(i).getProperty_data().split(",");
-
-                String setClause = "";
-                String columns = "";
-                String JOINQuery = "";
+                List<String> propertyList = new ArrayList<String>(Arrays.asList(propertyData));
+                List<String> joinDataList = new ArrayList<String>();
+                while(propertyList.remove(propertyData[0])) { }
                 for(int j=3; j<metaData.length; j++) {
-                    if("".equals(setClause)) {
-                        setClause = "b." + metaData[j] + " = " + after.getAsJsonObject().get(metaData[j]) + "'::text";
-                    } else {
-                        setClause = setClause + ", b." + metaData[j] + " = " + after.getAsJsonObject().get(metaData[j]) + "'::text";
+                    if(metaData[2].equals(metaData[j])) {
+                        continue;
+                    }
+                    if(after.getAsJsonObject().get(metaData[j]) != null) {
+                        joinDataList.add(after.getAsJsonObject().get(metaData[j]).toString());
                     }
                 }
                 for(int j=0; j<mappedData.length; j++) {
                     mappedDataDetail = mappedData[j].split(",");
-                    String alias = " b" + j;
-                    JOINQuery = JOINQuery +  " LEFT JOIN " + mappedDataDetail[0] + "." + mappedDataDetail[1] + alias
-                        + " ON a." + pkColumn + " =" + alias + "." + mappedDataDetail[2];
                     for(int k=3; k<mappedDataDetail.length; k++) {
-                        if("".equals(setClause)) {
-                            setClause = alias + "." + mappedDataDetail[k] + " = " + after.getAsJsonObject().get(mappedDataDetail[k]) + "'::text";
-                        } else {
-                            setClause = setClause + ", b." + mappedDataDetail[k] + " = " + after.getAsJsonObject().get(mappedDataDetail[k]) + "'::text";
+                        if(after.getAsJsonObject().get(mappedDataDetail[k]) != null) {
+                            joinDataList.add(after.getAsJsonObject().get(mappedDataDetail[k]).toString());
                         }
                     }
+                }
+
+                String setClause = "";
+                for(int j=0; j<joinDataList.size(); j++) {
+                    if("".equals(setClause)) {
+                        setClause = propertyList.get(j) + " = '" + joinDataList.get(j).replaceAll("\"", "") + "'::text";
+                    } else {
+                        setClause = setClause + ", " + propertyList.get(j) + " = '" + joinDataList.get(j).replaceAll("\"", "")  + "'::text";
+                    }
+                }
+                
+                String JOINQuery = "";
+                for(int j=0; j<mappedData.length; j++) {
+                    mappedDataDetail = mappedData[j].split(",");
+                    String alias = " b" + j;
+                    JOINQuery = JOINQuery +  " LEFT JOIN " + mappedDataDetail[0] + "." + mappedDataDetail[1] + alias
+                        + " ON b." + sourcePkColumn + " =" + alias + "." + mappedDataDetail[2];
                 }
                 String metaSchema = metaEntityList.get(i).getMeta_schema_name();
                 String metaTable = metaEntityList.get(i).getMeta_table_name();
@@ -304,48 +331,94 @@ public class KafkaConsumerService {
                     + " SET " + setClause
                     + " FROM " + metaData[0] + "." + metaData[1] + " b"
                     + JOINQuery
-                    + " WHERE a." + propertyData[0] + " = " + after.getAsJsonObject().get(metaData[2]).getAsString() + "::text";
-                System.out.println(updateForMetaSql);
-                
-            }
-        }
-/*
-        String[] pkCol = labelInfoEntity.getSource_pk_columns().split(",");
-        String conditions = "";
-        for(int i=0; i<pkCol.length; i++) {
-            conditions = conditions + " AND properties ->> '" + pkCol[i] + "' = '" + after.getAsJsonObject().get(pkCol[i]) + "'::text";
-        }
+                    + " WHERE a." + propertyData[0] + " = " + after.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
+                try {
+                    jdbcTemplate.execute(updateForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
 
-        String[] labelProp = labelInfoEntity.getTarget_label_properties().split(",");
-        String[] tbColumn = labelInfoEntity.getSource_columns().split(",");
-        String setclaus = "";
-        for(int i=0; i<labelProp.length; i++) {
-             */
-            /* Todo timestamp같이 age에 없는 데이터 타입 변경해야 함
-            String afterCol = after.getAsJsonObject().get(tbColumn[i]).getAsString();
-            if(map.get("\"" + tbColumn[i] + "\"") != null) {
-                String val = map.get("\"" + tbColumn[i] + "\"");
-                if(val.contains("Timestamp")) {
-                    afterCol = getTimestampToDate(afterCol);
+                UpdateVertexEntity updateVertexEntity = updateVertexQuery(metaEntityList.get(i).getMeta_id());
+                if(updateVertexEntity != null) {
+                    String graphName = updateVertexEntity.getGraph_name();
+                    String labelName = updateVertexEntity.getTarget_label_name();
+                    String keyProperty = updateVertexEntity.getKey_property();
+                    String conditions = " AND properties ->> '" + keyProperty + "' = '" + sourcePkValue + "'::text";
+
+                    String vertexValue = updateVertexValueQuery(metaEntityList.get(i).getMeta_id(), metaSchema, metaTable, keyProperty, sourcePkValue);
+                    JsonParser parser = new JsonParser();
+                    JsonObject jobj = (JsonObject)parser.parse(vertexValue);
+                    Iterator<String> iterator = jobj.keySet().iterator();
+                    String setGraphClause = "";
+                    while (iterator.hasNext()) {
+                        String key = iterator.next();
+                        String value = jobj.get(key).getAsString();
+                        if("".equals(setGraphClause)) {
+                            setGraphClause = "\"" + key + "\":\"" + value + "\"";
+                        } else {
+                            setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
+                        }
+                    }
+
+                    String updateSql = 
+                        "UPDATE " + graphName + "." + labelName
+                        + " SET properties = '{" + setGraphClause + "}'"
+                        + " WHERE 1 = 1 " + conditions;
+                    try {
+                        jdbcTemplate.execute(updateSql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
                 }
             }
-            */
-            /*
-            if(i > 0) {
-                setclaus = setclaus + ", \"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
-            } else {
-                setclaus = "\"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
-            }
         }
-        String graphName = labelInfoEntity.getGraph_name();
-        String labelName = labelInfoEntity.getTarget_label_name();
+    }
 
-        String sql = 
-            "update " + graphName + "." + labelName
-            + " set properties = '{" + setclaus + "}'"
-            + " WHERE 1 = 1 " + conditions;
-        jdbcTemplate.execute(sql);
-         */
+    @Deprecated
+    private UpdateVertexEntity updateVertexQuery(long meta_id) {
+        try {
+            String sql = "WITH pk AS ("
+                + " SELECT mi.meta_id, si.source_id"
+                + " FROM tb_meta_info mi"
+                + " JOIN tb_source_info si ON si.meta_id = mi.meta_id"
+                + " WHERE mi.meta_id = ?"
+                + " AND si.meta_key_yn = 'Y'"
+                + " AND si.source_pk_column_id = si.column_id"
+                + " )"
+                + " SELECT mi.meta_schema_name, mi.meta_table_name, li.graph_name, li.target_label_name, (SELECT property_name FROM tb_property_info WHERE source_id = pk.source_id) AS key_property"
+                + " FROM tb_label_info li"
+                + " JOIN tb_meta_info mi ON mi.meta_id = li.meta_id"
+                + " JOIN tb_property_info pi ON pi.label_id = li.label_id"
+                + " JOIN tb_source_info si ON si.source_id = pi.source_id"
+                + " JOIN pk ON pk.meta_id = mi.meta_id"
+                + " GROUP BY mi.meta_schema_name, mi.meta_table_name, li.graph_name, li.target_label_name, key_property";
+            
+            return jdbcTemplate.queryForObject(sql, new Object[] {meta_id}, (rs, rowNum) ->
+                new UpdateVertexEntity(
+                    rs.getString("meta_schema_name"),
+                    rs.getString("meta_table_name"),
+                    rs.getString("graph_name"),
+                    rs.getString("target_label_name"),
+                    rs.getString("key_property")
+                )
+            );
+        } catch(Exception e) {
+            System.out.println(e.getMessage());
+            return null;
+        }
+    }
+
+    @Deprecated
+    private String updateVertexValueQuery(long meta_id, String metaSchema, String metaTable, String keyProperty, String sourcePkValue) {
+        try {
+            String sql = "SELECT row_to_json(tb.*) AS val"
+                + " FROM " + metaSchema + "." + metaTable + " tb"
+                + " WHERE tb." + keyProperty + " = " + sourcePkValue + "::text";
+            return jdbcTemplate.queryForObject(sql, new Object[] {}, String.class);
+        } catch(Exception e) {
+            System.out.println(e.getMessage());
+            return null;
+        }
     }
 
     @Deprecated
