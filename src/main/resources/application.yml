@@ -6,6 +6,15 @@ spring:
     url: jdbc:postgresql://localhost:5432/postgres
     username: postgres
     password: post
+    hikari:
+      connection-timeout: 10000
+      validation-timeout: 10000
+      idle-timeout: 10000
+      minimum-idle: 0
+      max-lifetime: 60000
+      pool-name: SpringBootHikariCP
+      maximum-pool-size: 10
+      auto-commit: false
   jpa:
     hibernate:
       ddl-auto: update

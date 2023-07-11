@@ -13,6 +13,7 @@ import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -29,6 +30,9 @@ public class KafkaConsumerService {
 
     @Autowired
     JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
     // Todo
     // auto commit false로 하고 아래 쿼리들 진행
     // 1. spring.datasource.hikari.auto-commit: false
@@ -88,39 +92,45 @@ public class KafkaConsumerService {
                     + " WHERE a." + metaData[2] + " = " + after.getAsJsonObject().get(metaData[2]).getAsString() + "::text";
                 try {
                     jdbcTemplate.execute(insertForMetaSql);
-                } catch(Exception e) {
-                    System.out.println(e.getMessage());
-                }
 
-                InsertVertexEntity insertVertexEntity = insertVertexQuery(metaEntityList.get(i).getMeta_id());
-                if(insertVertexEntity != null) {
-                    String graphName = insertVertexEntity.getGraph_name();
-                    String labelName = insertVertexEntity.getTarget_label_name();
-                    String[] colms = insertVertexEntity.getSource_column_name().split(",");
-                    String[] pops = insertVertexEntity.getProperty_name().split(",");
+                    InsertVertexEntity insertVertexEntity = insertVertexQuery(metaEntityList.get(i).getMeta_id());
+                    if(insertVertexEntity != null) {
+                        String graphName = insertVertexEntity.getGraph_name();
+                        String labelName = insertVertexEntity.getTarget_label_name();
+                        String[] colms = insertVertexEntity.getSource_column_name().split(",");
+                        String[] pops = insertVertexEntity.getProperty_name().split(",");
 
-                    String conditions = " AND " + insertVertexEntity.getMeta_pk_column() + " = " + after.getAsJsonObject().get(pkColumn).getAsString() + "::text";
+                        String conditions = " AND " + insertVertexEntity.getMeta_pk_column() + " = " + after.getAsJsonObject().get(pkColumn).getAsString() + "::text";
 
-                    String buildmap = "";
-                    for(int j=0; j<pops.length; j++) {
-                        if(j > 0) {
-                            buildmap = buildmap + ", '" + pops[j] + "', a." + colms[j];
-                        } else {
-                            buildmap = "'" + pops[j] + "', a." + pops[j];
+                        String buildmap = "";
+                        for(int j=0; j<pops.length; j++) {
+                            if(j > 0) {
+                                buildmap = buildmap + ", '" + pops[j] + "', a." + colms[j];
+                            } else {
+                                buildmap = "'" + pops[j] + "', a." + pops[j];
+                            }
+                        }
+
+                        String insertSql = 
+                            "INSERT INTO " + graphName + "." + labelName
+                            + " SELECT _graphid((_label_id('" + graphName + "'::name, '" + labelName + "'::name))::integer, nextval('" + graphName + "." + labelName + "_id_seq'::regclass)), "
+                            + "     agtype_build_map ("+ buildmap +") "
+                            + "FROM "
+                            + "( "
+                            + "     SELECT " + insertVertexEntity.getProperty_name().toString()
+                            + "     FROM  " + metaSchema + "." + metaTable
+                            + "     WHERE 1 = 1 " + conditions
+                            + ") AS a;";
+                        try {
+                            jdbcTemplate.execute(insertSql);
+                            jdbcTemplate.getDataSource().getConnection().commit();
+                        } catch(Exception e) {
+                            jdbcTemplate.getDataSource().getConnection().rollback();
+                            System.out.println(e.getMessage());
                         }
                     }
-
-                    String insertSql = 
-                        "INSERT INTO " + graphName + "." + labelName
-                        + " SELECT _graphid((_label_id('" + graphName + "'::name, '" + labelName + "'::name))::integer, nextval('" + graphName + "." + labelName + "_id_seq'::regclass)), "
-                        + "     agtype_build_map ("+ buildmap +") "
-                        + "FROM "
-                        + "( "
-                        + "     SELECT " + insertVertexEntity.getProperty_name().toString()
-                        + "     FROM  " + metaSchema + "." + metaTable
-                        + "     WHERE 1 = 1 " + conditions
-                        + ") AS a;";
-                    jdbcTemplate.execute(insertSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
                 }
             }
         }
@@ -288,41 +298,41 @@ public class KafkaConsumerService {
                     + " WHERE a." + propertyData[0] + " = " + after.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
                 try {
                     jdbcTemplate.execute(updateForMetaSql);
-                } catch(Exception e) {
-                    System.out.println(e.getMessage());
-                }
 
-                UpdateVertexEntity updateVertexEntity = updateVertexQuery(metaEntityList.get(i).getMeta_id());
-                if(updateVertexEntity != null) {
-                    String graphName = updateVertexEntity.getGraph_name();
-                    String labelName = updateVertexEntity.getTarget_label_name();
-                    String keyProperty = updateVertexEntity.getKey_property();
-                    String conditions = " AND properties ->> '" + keyProperty + "' = '" + sourcePkValue + "'::text";
+                    UpdateVertexEntity updateVertexEntity = updateVertexQuery(metaEntityList.get(i).getMeta_id());
+                    if(updateVertexEntity != null) {
+                        String graphName = updateVertexEntity.getGraph_name();
+                        String labelName = updateVertexEntity.getTarget_label_name();
+                        String keyProperty = updateVertexEntity.getKey_property();
+                        String conditions = " AND properties ->> '" + keyProperty + "' = '" + sourcePkValue + "'::text";
 
-                    String vertexValue = updateVertexValueQuery(metaEntityList.get(i).getMeta_id(), metaSchema, metaTable, keyProperty, sourcePkValue);
-                    JsonParser parser = new JsonParser();
-                    JsonObject jobj = (JsonObject)parser.parse(vertexValue);
-                    Iterator<String> iterator = jobj.keySet().iterator();
-                    String setGraphClause = "";
-                    while (iterator.hasNext()) {
-                        String key = iterator.next();
-                        String value = jobj.get(key).getAsString();
-                        if("".equals(setGraphClause)) {
-                            setGraphClause = "\"" + key + "\":\"" + value + "\"";
-                        } else {
-                            setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
+                        String vertexValue = updateVertexValueQuery(metaEntityList.get(i).getMeta_id(), metaSchema, metaTable, keyProperty, sourcePkValue);
+                        JsonParser parser = new JsonParser();
+                        JsonObject jobj = (JsonObject)parser.parse(vertexValue);
+                        Iterator<String> iterator = jobj.keySet().iterator();
+                        String setGraphClause = "";
+                        while (iterator.hasNext()) {
+                            String key = iterator.next();
+                            String value = jobj.get(key).getAsString();
+                            if("".equals(setGraphClause)) {
+                                setGraphClause = "\"" + key + "\":\"" + value + "\"";
+                            } else {
+                                setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
+                            }
+                        }
+
+                        String updateSql = 
+                            "UPDATE " + graphName + "." + labelName
+                            + " SET properties = '{" + setGraphClause + "}'"
+                            + " WHERE 1 = 1 " + conditions;
+                        try {
+                            jdbcTemplate.execute(updateSql);
+                        } catch(Exception e) {
+                            System.out.println(e.getMessage());
                         }
                     }
-
-                    String updateSql = 
-                        "UPDATE " + graphName + "." + labelName
-                        + " SET properties = '{" + setGraphClause + "}'"
-                        + " WHERE 1 = 1 " + conditions;
-                    try {
-                        jdbcTemplate.execute(updateSql);
-                    } catch(Exception e) {
-                        System.out.println(e.getMessage());
-                    }
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
                 }
             }
         }
@@ -391,25 +401,25 @@ public class KafkaConsumerService {
                     + " WHERE " + propertyData[0] + " = " + before.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
                 try {
                     jdbcTemplate.execute(deleteForMetaSql);
+
+                    DeleteVertexEntity deleteVertexEntity = deleteVertexQuery(metaEntityList.get(i).getMeta_id());
+                    if(deleteVertexEntity != null) {
+                        String metaPkColumn = deleteVertexEntity.getMeta_pk_column();
+                        String conditions = " AND properties ->> '" + metaPkColumn + "' = '" + sourcePkValue + "'::text";
+                        
+                        String graphName = deleteVertexEntity.getGraph_name();
+                        String labelName = deleteVertexEntity.getTarget_label_name();
+
+                        String sql = "DELETE FROM " + graphName + "." + labelName
+                            + " WHERE 1 = 1 " + conditions;
+                        try {
+                            jdbcTemplate.execute(sql);
+                        } catch(Exception e) {
+                            System.out.println(e.getMessage());
+                        }
+                    }
                 } catch(Exception e) {
                     System.out.println(e.getMessage());
-                }
-
-                DeleteVertexEntity deleteVertexEntity = deleteVertexQuery(metaEntityList.get(i).getMeta_id());
-                if(deleteVertexEntity != null) {
-                    String metaPkColumn = deleteVertexEntity.getMeta_pk_column();
-                    String conditions = " AND properties ->> '" + metaPkColumn + "' = '" + sourcePkValue + "'::text";
-                    
-                    String graphName = deleteVertexEntity.getGraph_name();
-                    String labelName = deleteVertexEntity.getTarget_label_name();
-
-                    String sql = "DELETE FROM " + graphName + "." + labelName
-                        + " WHERE 1 = 1 " + conditions;
-                    try {
-                        jdbcTemplate.execute(sql);
-                    } catch(Exception e) {
-                        System.out.println(e.getMessage());
-                    }
                 }
             }
         }
