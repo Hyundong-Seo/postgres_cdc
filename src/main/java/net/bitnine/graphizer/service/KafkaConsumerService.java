@@ -208,7 +208,7 @@ public class KafkaConsumerService {
                     + "  agtype_build_map("+ buildmap +") "
                     + "from "
                     + "( "
-                    + "  SELECT " + startId + ", " + endId +  ", " + columns
+                    + "  SELECT st.id as start_id, en.id as end_id, " + columns
                     + "  FROM  "+ metaSchema +"."+ metaTable + " tb "
                     + "  JOIN " + graphName + "." + startLabelName + " st "
                     + "  ON tb." + startId + " = st.properties ->> '" + startLabelIdName + "'"
