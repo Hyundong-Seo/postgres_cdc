@@ -569,6 +569,56 @@ public class KafkaConsumerService {
                 }
             }
         }
+
+        List<EdgeEntity> edgeMetaEntityList = selectEdgeMetaQuery(schemaName, tableName);
+        if(edgeMetaEntityList.size() > 0) {
+            for(int i=0; i<edgeMetaEntityList.size(); i++) {
+                String graphName = edgeMetaEntityList.get(i).getGraph_name();
+                String targetLabelName = edgeMetaEntityList.get(i).getTarget_label_name();
+                String startLabelName = edgeMetaEntityList.get(i).getStart_label_name();
+                String endLabelName = edgeMetaEntityList.get(i).getEnd_label_name();
+                String metaSchema = edgeMetaEntityList.get(i).getMeta_schema_name();
+                String metaTable = edgeMetaEntityList.get(i).getMeta_table_name();
+                String startLabelIdName = edgeMetaEntityList.get(i).getStart_label_id_name();
+                String endLabelIdName = edgeMetaEntityList.get(i).getEnd_label_id_name();
+                String startId = edgeMetaEntityList.get(i).getTarget_start_label_id_name();
+                String endId = edgeMetaEntityList.get(i).getTarget_end_label_id_name();
+                String[] columnName = edgeMetaEntityList.get(i).getColumn_name().split(",");
+                String[] propertyName = edgeMetaEntityList.get(i).getProperty_name().split(",");
+
+                String conditions = "";
+                String startIdValue = "";
+                String endIdValue = "";
+                for(int j=0; j<propertyName.length; j++) {
+                    if(propertyName[j].equals(startId)) {
+                        startIdValue = before.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = " AND " + propertyName[j] + " = " + startIdValue + "::text";
+                        continue;
+                    }
+                    if(propertyName[j].equals(endId)) {
+                        endIdValue = before.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = conditions + " AND " + propertyName[j] + " = " + endIdValue + "::text";
+                        continue;
+                    }
+                }
+                String deleteForMetaSql = "DELETE FROM " + metaSchema + "." + metaTable
+                    + "  WHERE 1 = 1 " + conditions;
+                try {
+                    jdbcTemplate.execute(deleteForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+
+                String sql = "DELETE FROM "  + graphName + "." + targetLabelName
+                    + " WHERE start_id = (SELECT id FROM " + graphName + "." + startLabelName + " WHERE properties->> '" + startLabelIdName + "' = " + startIdValue + "::text)"
+                    + " AND end_id = (SELECT id FROM " + graphName + "." + endLabelName + " WHERE properties->> '" + endLabelIdName + "' = " + endIdValue + "::text)";
+                try {
+                    jdbcTemplate.execute(sql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        }
     }
 
     @Deprecated
