@@ -13,11 +13,11 @@ import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import net.bitnine.graphizer.model.entity.DeleteVertexEntity;
+import net.bitnine.graphizer.model.entity.EdgeEntity;
 import net.bitnine.graphizer.model.entity.InsertVertexEntity;
 import net.bitnine.graphizer.model.entity.UpdateVertexEntity;
 import net.bitnine.graphizer.model.entity.MetaEntity;
@@ -29,6 +29,9 @@ public class KafkaConsumerService {
 
     @Autowired
     JdbcTemplate jdbcTemplate;
+
+    // @Autowired
+    // private TransactionTemplate transactionTemplate;
     // Todo
     // auto commit false로 하고 아래 쿼리들 진행
     // 1. spring.datasource.hikari.auto-commit: false
@@ -36,7 +39,7 @@ public class KafkaConsumerService {
 
     @Deprecated
     public void insertData(JsonObject after, String schemaName, String tableName) {
-        List<MetaEntity> metaEntityList = selectMetaQuery(schemaName, tableName);
+        List<MetaEntity> metaEntityList = selectVertexMetaQuery(schemaName, tableName);
         if(metaEntityList.size() > 0) {
             for(int i=0; i<metaEntityList.size(); i++) {
                 String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
@@ -120,14 +123,110 @@ public class KafkaConsumerService {
                         + "     FROM  " + metaSchema + "." + metaTable
                         + "     WHERE 1 = 1 " + conditions
                         + ") AS a;";
-                    jdbcTemplate.execute(insertSql);
+                    try {
+                        jdbcTemplate.execute(insertSql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
+                }
+            }
+        }
+
+        List<EdgeEntity> edgeMetaEntityList = selectEdgeMetaQuery(schemaName, tableName);
+        if(edgeMetaEntityList.size() > 0) {
+            for(int i=0; i<edgeMetaEntityList.size(); i++) {
+                String graphName = edgeMetaEntityList.get(i).getGraph_name();
+                String targetLabelName = edgeMetaEntityList.get(i).getTarget_label_name();
+                String startLabelName = edgeMetaEntityList.get(i).getStart_label_name();
+                String endLabelName = edgeMetaEntityList.get(i).getEnd_label_name();
+                String metaSchema = edgeMetaEntityList.get(i).getMeta_schema_name();
+                String metaTable = edgeMetaEntityList.get(i).getMeta_table_name();
+                String startLabelIdName = edgeMetaEntityList.get(i).getStart_label_id_name();
+                String endLabelIdName = edgeMetaEntityList.get(i).getEnd_label_id_name();
+                String startId = edgeMetaEntityList.get(i).getTarget_start_label_id_name();
+                String endId = edgeMetaEntityList.get(i).getTarget_end_label_id_name();
+                String[] columnName = edgeMetaEntityList.get(i).getColumn_name().split(",");
+                String[] propertyName = edgeMetaEntityList.get(i).getProperty_name().split(",");
+
+                String columns = "";
+                String buildmap = "";
+                String conditions = "";
+                String startIdValue = "";
+                String endIdValue = "";
+                for(int j=0; j<propertyName.length; j++) {
+                    if(propertyName[j].equals(startId)) {
+                        startIdValue = after.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = " AND " + columnName[j] + " = " + startIdValue + "::text";
+                        continue;
+                    }
+                    if(propertyName[j].equals(endId)) {
+                        endIdValue = after.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = conditions + " AND " + columnName[j] + " = " + endIdValue + "::text";
+                        continue;
+                    }
+                }
+
+                String insertForMetaSql = "INSERT INTO " + metaSchema + "." + metaTable
+                    + " (" + edgeMetaEntityList.get(i).getProperty_name() + ")"
+                    + " SELECT " + edgeMetaEntityList.get(i).getColumn_name()
+                    + " FROM " + edgeMetaEntityList.get(i).getSource_schema_name() + "." + edgeMetaEntityList.get(i).getSource_table_name()
+                    + "  WHERE 1 = 1 " + conditions;
+                try {
+                    jdbcTemplate.execute(insertForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+
+                conditions = "";
+                for(int j=0; j<propertyName.length; j++) {
+                    if(propertyName[j].equals(startId)) {
+                        conditions = " AND " + propertyName[j] + " = " + startIdValue + "::text";
+                        continue;
+                    }
+                    if(propertyName[j].equals(endId)) {
+                        conditions = conditions + " AND " + propertyName[j] + " = " + endIdValue + "::text";
+                        continue;
+                    }
+
+                    if("".equals(columns)) {
+                        columns = propertyName[j];
+                    } else {
+                        columns = columns + ", " + propertyName[j];
+                    }
+                    if("".equals(buildmap)) {
+                        buildmap = "'" + propertyName[j] + "', a." + propertyName[j];
+                    } else {
+                        buildmap = buildmap + ", '" + propertyName[j] + "', a." + propertyName[j];
+                    }
+                }
+                String sql = 
+                    "INSERT INTO " + graphName + "." + targetLabelName
+                    + " select "
+                    + "  _graphid((_label_id('" + graphName + "'::name, '" + targetLabelName + "'::name))::integer, nextval('" + graphName + "." + targetLabelName + "_id_seq'::regclass)), "
+                    + "  a.start_id::text::graphid, "
+                    + "  a.end_id::text::graphid, "
+                    + "  agtype_build_map("+ buildmap +") "
+                    + "from "
+                    + "( "
+                    + "  SELECT " + startId + ", " + endId +  ", " + columns
+                    + "  FROM  "+ metaSchema +"."+ metaTable + " tb "
+                    + "  JOIN " + graphName + "." + startLabelName + " st "
+                    + "  ON tb." + startId + " = st.properties ->> '" + startLabelIdName + "'"
+                    + "  JOIN " + graphName + "." + endLabelName + " en "
+                    + "  ON tb." + endId + " = en.properties ->> '" + endLabelIdName + "'"
+                    + "  WHERE 1 = 1 " + conditions
+                    + ") AS a;";
+                try {
+                    jdbcTemplate.execute(sql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
                 }
             }
         }
     }
 
     @Deprecated
-    private List<MetaEntity> selectMetaQuery(String schemaName, String tableName) {
+    private List<MetaEntity> selectVertexMetaQuery(String schemaName, String tableName) {
         try {
             String sql = "WITH sc AS ("
                 + "     SELECT si.meta_id"
@@ -176,7 +275,7 @@ public class KafkaConsumerService {
                 + "     ) a"
                 + "     GROUP BY a.meta_id, a.meta_schema_name, a.meta_table_name, a.mapped_key_schema_name, a.mapped_key_table_name, a.mapped_pk_column_name, a.property_name"
                 + " ) b"
-                + " right JOIN mt ON mt.meta_id = b.meta_id"
+                + " RIGHT JOIN mt ON mt.meta_id = b.meta_id"
                 + " GROUP BY mt.meta_id, mt.meta_schema_name, mt.meta_table_name, mt.meta_data, mt.property_data, mt.property_data";
             
             return jdbcTemplate.query(sql, new Object[] {schemaName, tableName}, (rs, rowNum) ->
@@ -187,6 +286,64 @@ public class KafkaConsumerService {
                     rs.getString("meta_data"),
                     rs.getString("mapped_data"),
                     rs.getString("property_data")
+                )
+            );
+        } catch(Exception e) {
+            System.out.println(e.getMessage());
+            return null;
+        }
+    }
+
+    @Deprecated
+    private List<EdgeEntity> selectEdgeMetaQuery(String schemaName, String tableName) {
+        try {
+            String sql = "WITH sc AS ("
+                + "     SELECT si.meta_id"
+                + "     FROM tb_column_info ci"
+                + "     JOIN tb_source_info si ON ci.column_id = si.column_id"
+                + "     WHERE ci.schema_name = ?"
+                + "     AND ci.table_name = ?"
+                + "     GROUP BY si.meta_id"
+                + " ), tb AS ("
+                + "     SELECT sc.meta_id, mi.meta_schema_name, mi.meta_table_name, ci.schema_name AS source_schema_name, ci.table_name AS source_table_name"
+                + "     FROM tb_meta_info mi"
+                + "     JOIN tb_source_info si ON si.meta_id = mi.meta_id"
+                + "     JOIN tb_column_info ci ON ci.column_id = si.column_id"
+                + "     JOIN sc ON sc.meta_id = mi.meta_id AND sc.meta_id = si.meta_id"
+                + "     WHERE mi.use_yn = 'Y'"
+                + "     AND si.meta_key_yn = '' OR si.meta_key_yn is null"
+                + "     GROUP BY sc.meta_id, mi.meta_schema_name, mi.meta_table_name, source_schema_name, source_table_name"
+                + " )"
+                + " SELECT li.graph_name, li.start_label_name,"
+                + "     (SELECT property_name FROM tb_property_info WHERE property_id = li.start_label_id) AS start_label_id_name, li.end_label_name,"
+                + "     (SELECT property_name FROM tb_property_info WHERE property_id = li.end_label_id) AS end_label_id_name, li.target_label_name,"
+                + "     (SELECT property_name FROM tb_property_info WHERE property_id = li.target_start_label_id) AS target_start_label_id_name,"
+                + "     (SELECT property_name FROM tb_property_info WHERE property_id = li.target_end_label_id) AS target_end_label_id_name, string_agg(pi.property_name, ',') AS property_name, tb.meta_schema_name, tb.meta_table_name, ci.schema_name AS source_schema_name, ci.table_name AS source_table_name, string_agg(ci.column_name, ',') AS column_name"
+                + " FROM tb_label_info li"
+                + " JOIN tb_property_info pi ON pi.label_id = li.label_id"
+                + " JOIN tb_source_info si ON si.source_id = pi.source_id"
+                + " JOIN tb_column_info ci ON ci.column_id = si.column_id"
+                + " JOIN sc ON sc.meta_id = li.meta_id"
+                + " JOIN tb ON tb.source_schema_name = ci.schema_name AND tb.source_table_name = ci.table_name"
+                + " WHERE li.use_yn  = 'Y'"
+                + " GROUP BY li.graph_name, li.start_label_name, li.start_label_id, li.end_label_name, li.end_label_id, li.target_label_name, li.target_start_label_id, li.target_end_label_id, tb.meta_schema_name, tb.meta_table_name, ci.schema_name, ci.table_name;";
+            
+            return jdbcTemplate.query(sql, new Object[] {schemaName, tableName}, (rs, rowNum) ->
+                new EdgeEntity(
+                    rs.getString("graph_name"),
+                    rs.getString("start_label_name"),
+                    rs.getString("start_label_id_name"),
+                    rs.getString("end_label_name"),
+                    rs.getString("end_label_id_name"),
+                    rs.getString("target_label_name"),
+                    rs.getString("target_start_label_id_name"),
+                    rs.getString("target_end_label_id_name"),
+                    rs.getString("property_name"),
+                    rs.getString("meta_schema_name"),
+                    rs.getString("meta_table_name"),
+                    rs.getString("source_schema_name"),
+                    rs.getString("source_table_name"),
+                    rs.getString("column_name")
                 )
             );
         } catch(Exception e) {
@@ -208,16 +365,15 @@ public class KafkaConsumerService {
                 + " AND si.meta_key_yn = 'Y'"
                 + " GROUP BY li.label_id, si.source_pk_column_id, pi.property_name"
                 + " )"
-                + " SELECT li.label_id, li.label_type, li.graph_name, li.target_label_name, pk.source_pk_column, pk.meta_pk_column, string_agg((SELECT column_name FROM tb_column_info ci JOIN tb_source_info si ON ci.column_id = si.column_id WHERE si.source_id = pi.source_id), ',') AS source_column_name, string_agg(pi.property_name, ',') AS property_name"
+                + " SELECT li.label_id, li.graph_name, li.target_label_name, pk.source_pk_column, pk.meta_pk_column, string_agg((SELECT column_name FROM tb_column_info ci JOIN tb_source_info si ON ci.column_id = si.column_id WHERE si.source_id = pi.source_id), ',') AS source_column_name, string_agg(pi.property_name, ',') AS property_name"
                 + " FROM tb_label_info li"
                 + " JOIN tb_property_info pi ON pi.label_id = li.label_id"
                 + " JOIN pk ON pk.label_id = li.label_id"
-                + " GROUP BY li.label_id, li.label_type, li.graph_name, li.target_label_name, pk.source_pk_column, pk.meta_pk_column";
+                + " GROUP BY li.label_id, li.graph_name, li.target_label_name, pk.source_pk_column, pk.meta_pk_column";
             
             return jdbcTemplate.queryForObject(sql, new Object[] {meta_id}, (rs, rowNum) ->
                 new InsertVertexEntity(
                     rs.getLong("label_id"),
-                    rs.getString("label_type"),
                     rs.getString("graph_name"),
                     rs.getString("target_label_name"),
                     rs.getString("source_pk_column"),
@@ -234,7 +390,7 @@ public class KafkaConsumerService {
 
     @Deprecated
     public void updateData(JsonObject after, Map<String, String> map, String schemaName, String tableName) {
-        List<MetaEntity> metaEntityList = selectMetaQuery(schemaName, tableName);
+        List<MetaEntity> metaEntityList = selectVertexMetaQuery(schemaName, tableName);
         if(metaEntityList.size() > 0) {
             for(int i=0; i<metaEntityList.size(); i++) {
                 String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
@@ -377,7 +533,7 @@ public class KafkaConsumerService {
 
     @Deprecated
     public void deleteData(JsonObject before, String schemaName, String tableName) {
-        List<MetaEntity> metaEntityList = selectMetaQuery(schemaName, tableName);
+        List<MetaEntity> metaEntityList = selectVertexMetaQuery(schemaName, tableName);
         if(metaEntityList.size() > 0) {
             for(int i=0; i<metaEntityList.size(); i++) {
                 String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
@@ -428,16 +584,15 @@ public class KafkaConsumerService {
                 + " AND si.meta_key_yn = 'Y'"
                 + " GROUP BY li.label_id, pi.property_name"
                 + " )"
-                + " SELECT li.label_id, li.label_type, li.graph_name, li.target_label_name, pk.meta_pk_column"
+                + " SELECT li.label_id, li.graph_name, li.target_label_name, pk.meta_pk_column"
                 + " FROM tb_label_info li"
                 + " JOIN tb_property_info pi ON pi.label_id = li.label_id"
                 + " JOIN pk ON pk.label_id = li.label_id"
-                + " GROUP BY li.label_id, li.label_type, li.graph_name, li.target_label_name, pk.meta_pk_column";
+                + " GROUP BY li.label_id, li.graph_name, li.target_label_name, pk.meta_pk_column";
             
             return jdbcTemplate.queryForObject(sql, new Object[] {meta_id}, (rs, rowNum) ->
                 new DeleteVertexEntity(
                     rs.getLong("label_id"),
-                    rs.getString("label_type"),
                     rs.getString("graph_name"),
                     rs.getString("target_label_name"),
                     rs.getString("meta_pk_column")

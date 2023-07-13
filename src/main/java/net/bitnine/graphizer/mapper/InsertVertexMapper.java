@@ -12,7 +12,6 @@ public class InsertVertexMapper implements RowMapper<InsertVertexEntity> {
     @Override
     public InsertVertexEntity mapRow(ResultSet rs, int rowNum) throws SQLException {
         InsertVertexEntity insertVertexEntity = new InsertVertexEntity();
-        insertVertexEntity.setLabel_type(rs.getString("label_type"));
         insertVertexEntity.setGraph_name(rs.getString("graph_name"));
         insertVertexEntity.setTarget_label_name(rs.getString("target_label_name"));
         insertVertexEntity.setSource_pk_column(rs.getString("source_pk_column"));

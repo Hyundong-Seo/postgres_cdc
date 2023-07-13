@@ -17,8 +17,6 @@ public class InsertVertexEntity implements Serializable {
     @Id
     private long label_id;
     @Id
-    private String label_type;
-    @Id
     private String graph_name;
     @Id
     private String target_label_name;
@@ -35,10 +33,9 @@ public class InsertVertexEntity implements Serializable {
 	}
     
     @Builder
-    public InsertVertexEntity(long label_id, String label_type, String graph_name, String target_label_name, String source_pk_column, String meta_pk_column,
+    public InsertVertexEntity(long label_id, String graph_name, String target_label_name, String source_pk_column, String meta_pk_column,
                             String source_column_name, String property_name) {
 		this.label_id = label_id;
-        this.label_type = label_type;
 		this.graph_name = graph_name;
 		this.target_label_name = target_label_name;
         this.source_pk_column = source_pk_column;
