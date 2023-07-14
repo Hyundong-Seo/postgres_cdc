@@ -60,7 +60,7 @@ public class KafkaConsumerService {
                     }
                 }
                 String columns = "";
-                String JOINQuery = "";
+                String joinQuery = "";
                 for(int j=3; j<metaData.length; j++) {
                     if("".equals(columns)) {
                         columns = "a." + metaData[j];
@@ -71,7 +71,7 @@ public class KafkaConsumerService {
                 for(int j=0; j<mappedData.length; j++) {
                     mappedDataDetail = mappedData[j].split(",");
                     String alias = " b" + j;
-                    JOINQuery = JOINQuery +  " LEFT JOIN " + mappedDataDetail[0] + "." + mappedDataDetail[1] + alias
+                    joinQuery = joinQuery +  " LEFT JOIN " + mappedDataDetail[0] + "." + mappedDataDetail[1] + alias
                         + " ON a." + pkColumn + " =" + alias + "." + mappedDataDetail[2];
                     for(int k=3; k<mappedDataDetail.length; k++) {
                         if("".equals(columns)) {
@@ -87,7 +87,7 @@ public class KafkaConsumerService {
                     + " (" + metaColumns + ")"
                     + " SELECT " + columns
                     + " FROM " + metaData[0] + "." + metaData[1] + " a"
-                    + JOINQuery
+                    + joinQuery
                     + " WHERE a." + metaData[2] + " = " + after.getAsJsonObject().get(metaData[2]).getAsString() + "::text";
                 try {
                     jdbcTemplate.execute(insertForMetaSql);
@@ -216,6 +216,276 @@ public class KafkaConsumerService {
                     + "  ON tb." + endId + " = en.properties ->> '" + endLabelIdName + "'"
                     + "  WHERE 1 = 1 " + conditions
                     + ") AS a;";
+                try {
+                    jdbcTemplate.execute(sql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        }
+    }
+
+    @Deprecated
+    public void updateData(JsonObject after, Map<String, String> map, String schemaName, String tableName) {
+        List<MetaEntity> metaEntityList = selectVertexMetaQuery(schemaName, tableName);
+        if(metaEntityList.size() > 0) {
+            for(int i=0; i<metaEntityList.size(); i++) {
+                String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
+                String sourcePkColumn = metaData[2];
+                String sourcePkValue = after.getAsJsonObject().get(sourcePkColumn).getAsString();
+                String[] mappedData = metaEntityList.get(i).getMapped_data().toString().split("!");
+                String[] mappedDataDetail = {};
+                String[] propertyData = metaEntityList.get(i).getProperty_data().split(",");
+                List<String> propertyList = new ArrayList<String>(Arrays.asList(propertyData));
+                List<String> joinDataList = new ArrayList<String>();
+                while(propertyList.remove(propertyData[0])) { }
+                for(int j=3; j<metaData.length; j++) {
+                    if(metaData[2].equals(metaData[j])) {
+                        continue;
+                    }
+                    if(after.getAsJsonObject().get(metaData[j]) != null) {
+                        joinDataList.add(after.getAsJsonObject().get(metaData[j]).toString());
+                    }
+                }
+                for(int j=0; j<mappedData.length; j++) {
+                    mappedDataDetail = mappedData[j].split(",");
+                    for(int k=3; k<mappedDataDetail.length; k++) {
+                        if(after.getAsJsonObject().get(mappedDataDetail[k]) != null) {
+                            joinDataList.add(after.getAsJsonObject().get(mappedDataDetail[k]).toString());
+                        }
+                    }
+                }
+
+                String setClause = "";
+                for(int j=0; j<joinDataList.size(); j++) {
+                    if("".equals(setClause)) {
+                        setClause = propertyList.get(j) + " = '" + joinDataList.get(j).replaceAll("\"", "") + "'::text";
+                    } else {
+                        setClause = setClause + ", " + propertyList.get(j) + " = '" + joinDataList.get(j).replaceAll("\"", "")  + "'::text";
+                    }
+                }
+                
+                String joinQuery = "";
+                for(int j=0; j<mappedData.length; j++) {
+                    mappedDataDetail = mappedData[j].split(",");
+                    String alias = " b" + j;
+                    joinQuery = joinQuery +  " LEFT JOIN " + mappedDataDetail[0] + "." + mappedDataDetail[1] + alias
+                        + " ON b." + sourcePkColumn + " =" + alias + "." + mappedDataDetail[2];
+                }
+                String metaSchema = metaEntityList.get(i).getMeta_schema_name();
+                String metaTable = metaEntityList.get(i).getMeta_table_name();
+                String updateForMetaSql = "UPDATE " + metaSchema + "." + metaTable + " a"
+                    + " SET " + setClause
+                    + " FROM " + metaData[0] + "." + metaData[1] + " b"
+                    + joinQuery
+                    + " WHERE a." + propertyData[0] + " = " + after.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
+                try {
+                    jdbcTemplate.execute(updateForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+
+                UpdateVertexEntity updateVertexEntity = updateVertexQuery(metaEntityList.get(i).getMeta_id());
+                if(updateVertexEntity != null) {
+                    String graphName = updateVertexEntity.getGraph_name();
+                    String labelName = updateVertexEntity.getTarget_label_name();
+                    String keyProperty = updateVertexEntity.getKey_property();
+                    String conditions = " AND properties ->> '" + keyProperty + "' = '" + sourcePkValue + "'::text";
+
+                    String vertexValue = updateVertexValueQuery(metaSchema, metaTable, keyProperty, sourcePkValue);
+                    JsonParser parser = new JsonParser();
+                    JsonObject jobj = (JsonObject)parser.parse(vertexValue);
+                    Iterator<String> iterator = jobj.keySet().iterator();
+                    String setGraphClause = "";
+                    while (iterator.hasNext()) {
+                        String key = iterator.next();
+                        String value = jobj.get(key).getAsString();
+                        if("".equals(setGraphClause)) {
+                            setGraphClause = "\"" + key + "\":\"" + value + "\"";
+                        } else {
+                            setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
+                        }
+                    }
+
+                    String updateSql = 
+                        "UPDATE " + graphName + "." + labelName
+                        + " SET properties = '{" + setGraphClause + "}'"
+                        + " WHERE 1 = 1 " + conditions;
+                    try {
+                        jdbcTemplate.execute(updateSql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
+                }
+            }
+        }
+
+        List<EdgeEntity> edgeMetaEntityList = selectEdgeMetaQuery(schemaName, tableName);
+        if(edgeMetaEntityList.size() > 0) {
+            for(int i=0; i<edgeMetaEntityList.size(); i++) {
+                String graphName = edgeMetaEntityList.get(i).getGraph_name();
+                String targetLabelName = edgeMetaEntityList.get(i).getTarget_label_name();
+                String startLabelName = edgeMetaEntityList.get(i).getStart_label_name();
+                String endLabelName = edgeMetaEntityList.get(i).getEnd_label_name();
+                String metaSchema = edgeMetaEntityList.get(i).getMeta_schema_name();
+                String metaTable = edgeMetaEntityList.get(i).getMeta_table_name();
+                String startLabelIdName = edgeMetaEntityList.get(i).getStart_label_id_name();
+                String endLabelIdName = edgeMetaEntityList.get(i).getEnd_label_id_name();
+                String startId = edgeMetaEntityList.get(i).getTarget_start_label_id_name();
+                String endId = edgeMetaEntityList.get(i).getTarget_end_label_id_name();
+                String sourceSchemaName = edgeMetaEntityList.get(i).getSource_schema_name();
+                String sourceTableName = edgeMetaEntityList.get(i).getSource_table_name();
+                String[] columnName = edgeMetaEntityList.get(i).getColumn_name().split(",");
+                String[] propertyName = edgeMetaEntityList.get(i).getProperty_name().split(",");
+
+                String conditions = "";
+                String startIdValue = "";
+                String endIdValue = "";
+                String setClause = "";
+                for(int j=0; j<propertyName.length; j++) {
+                    if(propertyName[j].equals(startId)) {
+                        startIdValue = after.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = " AND a." + propertyName[j] + " = " + startIdValue + "::text";
+                        continue;
+                    }
+                    if(propertyName[j].equals(endId)) {
+                        endIdValue = after.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = conditions + " AND a." + propertyName[j] + " = " + endIdValue + "::text";
+                        continue;
+                    }
+                    if("".equals(setClause)) {
+                        setClause = propertyName[j] + " = '" + after.getAsJsonObject().get(columnName[j]).getAsString() + "'::text";
+                    } else {
+                        setClause = setClause + ", " + propertyName[j] + " = '" + columnName[j].replaceAll("\"", "")  + "'::text";
+                    }
+                }
+
+                String updateForMetaSql = "UPDATE " + metaSchema + "." + metaTable + " a"
+                    + " SET " + setClause
+                    + " FROM " + sourceSchemaName + "." + sourceTableName + " b"
+                    + " WHERE 1 = 1" + conditions;
+                try {
+                    jdbcTemplate.execute(updateForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+
+                String vertexValue = updateEdgeValueQuery(metaSchema, metaTable, startId, startIdValue, endId, endIdValue);
+                    JsonParser parser = new JsonParser();
+                    JsonObject jobj = (JsonObject)parser.parse(vertexValue);
+                    Iterator<String> iterator = jobj.keySet().iterator();
+                    String setGraphClause = "";
+                while (iterator.hasNext()) {
+                    String key = iterator.next();
+                    String value = jobj.get(key).getAsString();
+                    if(startId.equals(key)) {
+                        continue;
+                    }
+                    if(endId.equals(key)) {
+                        continue;
+                    }
+                    if("".equals(setGraphClause)) {
+                        setGraphClause = "\"" + key + "\":\"" + value + "\"";
+                    } else {
+                        setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
+                    }
+                }
+
+                String sql = "UPDATE " + graphName + "." + targetLabelName + " a"
+                    + " SET properties = '{" + setGraphClause + "}'"
+                    + " FROM " + metaSchema + "." + metaTable + " b"
+                    + " WHERE a.start_id = (SELECT id FROM " + graphName + "." + startLabelName + " WHERE properties->> '" + startLabelIdName + "' = " + startIdValue + "::text)"
+                    + " AND a.end_id = (SELECT id FROM " + graphName + "." + endLabelName + " WHERE properties->> '" + endLabelIdName + "' = " + endIdValue + "::text)";
+                try {
+                    jdbcTemplate.execute(sql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+            }
+        }
+    }
+
+    @Deprecated
+    public void deleteData(JsonObject before, String schemaName, String tableName) {
+        List<MetaEntity> metaEntityList = selectVertexMetaQuery(schemaName, tableName);
+        if(metaEntityList.size() > 0) {
+            for(int i=0; i<metaEntityList.size(); i++) {
+                String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
+                String sourcePkColumn = metaData[2];
+                String sourcePkValue = before.getAsJsonObject().get(sourcePkColumn).getAsString();
+                String[] propertyData = metaEntityList.get(i).getProperty_data().split(",");
+                
+                String metaSchema = metaEntityList.get(i).getMeta_schema_name();
+                String metaTable = metaEntityList.get(i).getMeta_table_name();
+                String deleteForMetaSql = "DELETE FROM " + metaSchema + "." + metaTable
+                    + " WHERE " + propertyData[0] + " = " + before.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
+                try {
+                    jdbcTemplate.execute(deleteForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+
+                DeleteVertexEntity deleteVertexEntity = deleteVertexQuery(metaEntityList.get(i).getMeta_id());
+                if(deleteVertexEntity != null) {
+                    String metaPkColumn = deleteVertexEntity.getMeta_pk_column();
+                    String conditions = " AND properties ->> '" + metaPkColumn + "' = '" + sourcePkValue + "'::text";
+                    
+                    String graphName = deleteVertexEntity.getGraph_name();
+                    String labelName = deleteVertexEntity.getTarget_label_name();
+
+                    String sql = "DELETE FROM " + graphName + "." + labelName
+                        + " WHERE 1 = 1 " + conditions;
+                    try {
+                        jdbcTemplate.execute(sql);
+                    } catch(Exception e) {
+                        System.out.println(e.getMessage());
+                    }
+                }
+            }
+        }
+
+        List<EdgeEntity> edgeMetaEntityList = selectEdgeMetaQuery(schemaName, tableName);
+        if(edgeMetaEntityList.size() > 0) {
+            for(int i=0; i<edgeMetaEntityList.size(); i++) {
+                String graphName = edgeMetaEntityList.get(i).getGraph_name();
+                String targetLabelName = edgeMetaEntityList.get(i).getTarget_label_name();
+                String startLabelName = edgeMetaEntityList.get(i).getStart_label_name();
+                String endLabelName = edgeMetaEntityList.get(i).getEnd_label_name();
+                String metaSchema = edgeMetaEntityList.get(i).getMeta_schema_name();
+                String metaTable = edgeMetaEntityList.get(i).getMeta_table_name();
+                String startLabelIdName = edgeMetaEntityList.get(i).getStart_label_id_name();
+                String endLabelIdName = edgeMetaEntityList.get(i).getEnd_label_id_name();
+                String startId = edgeMetaEntityList.get(i).getTarget_start_label_id_name();
+                String endId = edgeMetaEntityList.get(i).getTarget_end_label_id_name();
+                String[] columnName = edgeMetaEntityList.get(i).getColumn_name().split(",");
+                String[] propertyName = edgeMetaEntityList.get(i).getProperty_name().split(",");
+
+                String conditions = "";
+                String startIdValue = "";
+                String endIdValue = "";
+                for(int j=0; j<propertyName.length; j++) {
+                    if(propertyName[j].equals(startId)) {
+                        startIdValue = before.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = " AND " + propertyName[j] + " = " + startIdValue + "::text";
+                        continue;
+                    }
+                    if(propertyName[j].equals(endId)) {
+                        endIdValue = before.getAsJsonObject().get(columnName[j]).getAsString();
+                        conditions = conditions + " AND " + propertyName[j] + " = " + endIdValue + "::text";
+                        continue;
+                    }
+                }
+                String deleteForMetaSql = "DELETE FROM " + metaSchema + "." + metaTable
+                    + "  WHERE 1 = 1 " + conditions;
+                try {
+                    jdbcTemplate.execute(deleteForMetaSql);
+                } catch(Exception e) {
+                    System.out.println(e.getMessage());
+                }
+
+                String sql = "DELETE FROM "  + graphName + "." + targetLabelName
+                    + " WHERE start_id = (SELECT id FROM " + graphName + "." + startLabelName + " WHERE properties->> '" + startLabelIdName + "' = " + startIdValue + "::text)"
+                    + " AND end_id = (SELECT id FROM " + graphName + "." + endLabelName + " WHERE properties->> '" + endLabelIdName + "' = " + endIdValue + "::text)";
                 try {
                     jdbcTemplate.execute(sql);
                 } catch(Exception e) {
@@ -389,102 +659,6 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
-    public void updateData(JsonObject after, Map<String, String> map, String schemaName, String tableName) {
-        List<MetaEntity> metaEntityList = selectVertexMetaQuery(schemaName, tableName);
-        if(metaEntityList.size() > 0) {
-            for(int i=0; i<metaEntityList.size(); i++) {
-                String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
-                String sourcePkColumn = metaData[2];
-                String sourcePkValue = after.getAsJsonObject().get(sourcePkColumn).getAsString();
-                String[] mappedData = metaEntityList.get(i).getMapped_data().toString().split("!");
-                String[] mappedDataDetail = {};
-                String[] propertyData = metaEntityList.get(i).getProperty_data().split(",");
-                List<String> propertyList = new ArrayList<String>(Arrays.asList(propertyData));
-                List<String> joinDataList = new ArrayList<String>();
-                while(propertyList.remove(propertyData[0])) { }
-                for(int j=3; j<metaData.length; j++) {
-                    if(metaData[2].equals(metaData[j])) {
-                        continue;
-                    }
-                    if(after.getAsJsonObject().get(metaData[j]) != null) {
-                        joinDataList.add(after.getAsJsonObject().get(metaData[j]).toString());
-                    }
-                }
-                for(int j=0; j<mappedData.length; j++) {
-                    mappedDataDetail = mappedData[j].split(",");
-                    for(int k=3; k<mappedDataDetail.length; k++) {
-                        if(after.getAsJsonObject().get(mappedDataDetail[k]) != null) {
-                            joinDataList.add(after.getAsJsonObject().get(mappedDataDetail[k]).toString());
-                        }
-                    }
-                }
-
-                String setClause = "";
-                for(int j=0; j<joinDataList.size(); j++) {
-                    if("".equals(setClause)) {
-                        setClause = propertyList.get(j) + " = '" + joinDataList.get(j).replaceAll("\"", "") + "'::text";
-                    } else {
-                        setClause = setClause + ", " + propertyList.get(j) + " = '" + joinDataList.get(j).replaceAll("\"", "")  + "'::text";
-                    }
-                }
-                
-                String JOINQuery = "";
-                for(int j=0; j<mappedData.length; j++) {
-                    mappedDataDetail = mappedData[j].split(",");
-                    String alias = " b" + j;
-                    JOINQuery = JOINQuery +  " LEFT JOIN " + mappedDataDetail[0] + "." + mappedDataDetail[1] + alias
-                        + " ON b." + sourcePkColumn + " =" + alias + "." + mappedDataDetail[2];
-                }
-                String metaSchema = metaEntityList.get(i).getMeta_schema_name();
-                String metaTable = metaEntityList.get(i).getMeta_table_name();
-                String updateForMetaSql = "UPDATE " + metaSchema + "." + metaTable + " a"
-                    + " SET " + setClause
-                    + " FROM " + metaData[0] + "." + metaData[1] + " b"
-                    + JOINQuery
-                    + " WHERE a." + propertyData[0] + " = " + after.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
-                try {
-                    jdbcTemplate.execute(updateForMetaSql);
-                } catch(Exception e) {
-                    System.out.println(e.getMessage());
-                }
-
-                UpdateVertexEntity updateVertexEntity = updateVertexQuery(metaEntityList.get(i).getMeta_id());
-                if(updateVertexEntity != null) {
-                    String graphName = updateVertexEntity.getGraph_name();
-                    String labelName = updateVertexEntity.getTarget_label_name();
-                    String keyProperty = updateVertexEntity.getKey_property();
-                    String conditions = " AND properties ->> '" + keyProperty + "' = '" + sourcePkValue + "'::text";
-
-                    String vertexValue = updateVertexValueQuery(metaEntityList.get(i).getMeta_id(), metaSchema, metaTable, keyProperty, sourcePkValue);
-                    JsonParser parser = new JsonParser();
-                    JsonObject jobj = (JsonObject)parser.parse(vertexValue);
-                    Iterator<String> iterator = jobj.keySet().iterator();
-                    String setGraphClause = "";
-                    while (iterator.hasNext()) {
-                        String key = iterator.next();
-                        String value = jobj.get(key).getAsString();
-                        if("".equals(setGraphClause)) {
-                            setGraphClause = "\"" + key + "\":\"" + value + "\"";
-                        } else {
-                            setGraphClause = setGraphClause + ", \"" + key + "\":\"" + value + "\"";
-                        }
-                    }
-
-                    String updateSql = 
-                        "UPDATE " + graphName + "." + labelName
-                        + " SET properties = '{" + setGraphClause + "}'"
-                        + " WHERE 1 = 1 " + conditions;
-                    try {
-                        jdbcTemplate.execute(updateSql);
-                    } catch(Exception e) {
-                        System.out.println(e.getMessage());
-                    }
-                }
-            }
-        }
-    }
-
-    @Deprecated
     private UpdateVertexEntity updateVertexQuery(long meta_id) {
         try {
             String sql = "WITH pk AS ("
@@ -519,7 +693,7 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
-    private String updateVertexValueQuery(long meta_id, String metaSchema, String metaTable, String keyProperty, String sourcePkValue) {
+    private String updateVertexValueQuery(String metaSchema, String metaTable, String keyProperty, String sourcePkValue) {
         try {
             String sql = "SELECT row_to_json(tb.*) AS val"
                 + " FROM " + metaSchema + "." + metaTable + " tb"
@@ -532,92 +706,16 @@ public class KafkaConsumerService {
     }
 
     @Deprecated
-    public void deleteData(JsonObject before, String schemaName, String tableName) {
-        List<MetaEntity> metaEntityList = selectVertexMetaQuery(schemaName, tableName);
-        if(metaEntityList.size() > 0) {
-            for(int i=0; i<metaEntityList.size(); i++) {
-                String[] metaData = metaEntityList.get(i).getMeta_data().split(",");
-                String sourcePkColumn = metaData[2];
-                String sourcePkValue = before.getAsJsonObject().get(sourcePkColumn).getAsString();
-                String[] propertyData = metaEntityList.get(i).getProperty_data().split(",");
-                
-                String metaSchema = metaEntityList.get(i).getMeta_schema_name();
-                String metaTable = metaEntityList.get(i).getMeta_table_name();
-                String deleteForMetaSql = "DELETE FROM " + metaSchema + "." + metaTable
-                    + " WHERE " + propertyData[0] + " = " + before.getAsJsonObject().get(metaData[2]).toString().replaceAll("\"", "") + "::text";
-                try {
-                    jdbcTemplate.execute(deleteForMetaSql);
-                } catch(Exception e) {
-                    System.out.println(e.getMessage());
-                }
-
-                DeleteVertexEntity deleteVertexEntity = deleteVertexQuery(metaEntityList.get(i).getMeta_id());
-                if(deleteVertexEntity != null) {
-                    String metaPkColumn = deleteVertexEntity.getMeta_pk_column();
-                    String conditions = " AND properties ->> '" + metaPkColumn + "' = '" + sourcePkValue + "'::text";
-                    
-                    String graphName = deleteVertexEntity.getGraph_name();
-                    String labelName = deleteVertexEntity.getTarget_label_name();
-
-                    String sql = "DELETE FROM " + graphName + "." + labelName
-                        + " WHERE 1 = 1 " + conditions;
-                    try {
-                        jdbcTemplate.execute(sql);
-                    } catch(Exception e) {
-                        System.out.println(e.getMessage());
-                    }
-                }
-            }
-        }
-
-        List<EdgeEntity> edgeMetaEntityList = selectEdgeMetaQuery(schemaName, tableName);
-        if(edgeMetaEntityList.size() > 0) {
-            for(int i=0; i<edgeMetaEntityList.size(); i++) {
-                String graphName = edgeMetaEntityList.get(i).getGraph_name();
-                String targetLabelName = edgeMetaEntityList.get(i).getTarget_label_name();
-                String startLabelName = edgeMetaEntityList.get(i).getStart_label_name();
-                String endLabelName = edgeMetaEntityList.get(i).getEnd_label_name();
-                String metaSchema = edgeMetaEntityList.get(i).getMeta_schema_name();
-                String metaTable = edgeMetaEntityList.get(i).getMeta_table_name();
-                String startLabelIdName = edgeMetaEntityList.get(i).getStart_label_id_name();
-                String endLabelIdName = edgeMetaEntityList.get(i).getEnd_label_id_name();
-                String startId = edgeMetaEntityList.get(i).getTarget_start_label_id_name();
-                String endId = edgeMetaEntityList.get(i).getTarget_end_label_id_name();
-                String[] columnName = edgeMetaEntityList.get(i).getColumn_name().split(",");
-                String[] propertyName = edgeMetaEntityList.get(i).getProperty_name().split(",");
-
-                String conditions = "";
-                String startIdValue = "";
-                String endIdValue = "";
-                for(int j=0; j<propertyName.length; j++) {
-                    if(propertyName[j].equals(startId)) {
-                        startIdValue = before.getAsJsonObject().get(columnName[j]).getAsString();
-                        conditions = " AND " + propertyName[j] + " = " + startIdValue + "::text";
-                        continue;
-                    }
-                    if(propertyName[j].equals(endId)) {
-                        endIdValue = before.getAsJsonObject().get(columnName[j]).getAsString();
-                        conditions = conditions + " AND " + propertyName[j] + " = " + endIdValue + "::text";
-                        continue;
-                    }
-                }
-                String deleteForMetaSql = "DELETE FROM " + metaSchema + "." + metaTable
-                    + "  WHERE 1 = 1 " + conditions;
-                try {
-                    jdbcTemplate.execute(deleteForMetaSql);
-                } catch(Exception e) {
-                    System.out.println(e.getMessage());
-                }
-
-                String sql = "DELETE FROM "  + graphName + "." + targetLabelName
-                    + " WHERE start_id = (SELECT id FROM " + graphName + "." + startLabelName + " WHERE properties->> '" + startLabelIdName + "' = " + startIdValue + "::text)"
-                    + " AND end_id = (SELECT id FROM " + graphName + "." + endLabelName + " WHERE properties->> '" + endLabelIdName + "' = " + endIdValue + "::text)";
-                try {
-                    jdbcTemplate.execute(sql);
-                } catch(Exception e) {
-                    System.out.println(e.getMessage());
-                }
-            }
+    private String updateEdgeValueQuery(String metaSchema, String metaTable, String stProp, String stVal, String enProp, String enVal) {
+        try {
+            String sql = "SELECT row_to_json(tb.*) AS val"
+                + " FROM " + metaSchema + "." + metaTable + " tb"
+                + " WHERE tb." + stProp + " = " + stVal + "::text"
+                + " AND tb." + enProp + " = " + enVal + "::text";
+            return jdbcTemplate.queryForObject(sql, new Object[] {}, String.class);
+        } catch(Exception e) {
+            System.out.println(e.getMessage());
+            return null;
         }
     }
 
@@ -653,141 +751,6 @@ public class KafkaConsumerService {
             return null;
         }
     }
-
-    /*
-    @Deprecated
-    public void insertEdgeData(JsonObject after, ColumnInfoEntity columnInfoEntity) {
-        String startLb = after.getAsJsonObject().get("start_id").getAsString();
-        String endLb = after.getAsJsonObject().get("end_id").getAsString();
-        String conditions = " AND start_id = " + startLb + " AND end_id = " + endLb;
-        
-        String[] labelProp = labelInfoEntity.getTarget_label_properties().split(",");
-        String buildmap = "";
-        for(int i=0; i<labelProp.length; i++) {
-            if(i > 0) {
-                buildmap = buildmap + ", '" + labelProp[i] + "', a." + labelProp[i];
-            } else {
-                buildmap = "'" + labelProp[i] + "', data." + labelProp[i];
-            }
-        }
-        String graphName = labelInfoEntity.getGraph_name();
-        String targetLabelName = labelInfoEntity.getTarget_label_name();
-        String startLabelName = labelInfoEntity.getStart_label_name();
-        String startLabelId = labelInfoEntity.getStart_label_id();
-        String endLabelName = labelInfoEntity.getEnd_label_name();
-        String endLabelId = labelInfoEntity.getEnd_label_id();
-        String targetStartLabelId = labelInfoEntity.getTarget_start_label_id();
-        String targetEndLabelId = labelInfoEntity.getTarget_end_label_id();
-        String colms = (labelInfoEntity.getSource_columns() != null ? ", " + labelInfoEntity.getSource_columns() : "");
-        String rschem = labelInfoEntity.getSource_schema();
-        String tbname = labelInfoEntity.getSource_table_name();
-
-        String sql = 
-            "INSERT INTO " + graphName + "." + targetLabelName
-            + " select "
-            + "  _graphid((_label_id('" + graphName + "'::name, '" + targetLabelName + "'::name))::integer, nextval('" + graphName + "." + targetLabelName + "_id_seq'::regclass)), "
-            + "  data.startid::text::graphid, "
-            + "  data.endid::text::graphid, "
-            + "  agtype_build_map("+ buildmap +") "
-            + "from "
-            + "( "
-            + "  SELECT startid, endid " + colms
-            + "  FROM  "+ rschem +"."+ tbname + " tb "
-            + "  JOIN cypher('" + graphName + "', $$ "
-            + "    MATCH(v:" + startLabelName + ") RETURN id(v), v." + startLabelId
-            + "  $$) AS a (startid agtype, " + startLabelId +" agtype) "
-            + "  ON tb." + targetStartLabelId + " = a." + startLabelId
-            + "  JOIN cypher('" + graphName + "', $$ "
-            + "    MATCH(v:" + endLabelName + ") RETURN id(v), v." + endLabelId
-            + "  $$) AS b (endid agtype, " + endLabelId +" agtype) "
-            + "  ON tb." + targetEndLabelId + " = b." + endLabelId
-            + "  WHERE 1 = 1 " + conditions
-            + ") AS data;";
-        jdbcTemplate.execute(sql);
-    }
-    */
-
-    /*
-    @Deprecated
-    public void updateEdgeData(JsonObject after, ColumnInfoEntity columnInfoEntity, Map<String, String> map) {
-        String startLb = after.getAsJsonObject().get("start_id").getAsString();
-        String endLb = after.getAsJsonObject().get("end_id").getAsString();
-        String startLabelId = labelInfoEntity.getStart_label_id();
-        String endLabelId = labelInfoEntity.getEnd_label_id();
-        String targetStartLabelId = labelInfoEntity.getTarget_start_label_id();
-        String targetEndLabelId = labelInfoEntity.getTarget_end_label_id();
-        String conditions = " AND a." + targetStartLabelId + " = b." + startLabelId
-            + " AND a." + targetEndLabelId + " = " + endLabelId
-            + " AND b.egid = c.id";
-        
-        String graphName = labelInfoEntity.getGraph_name();
-        String targetLabelName = labelInfoEntity.getTarget_label_name();
-        String sourceSchema = labelInfoEntity.getSource_schema();
-        String sourceTableName = labelInfoEntity.getSource_table_name();
-        String startLabelName = labelInfoEntity.getStart_label_name();
-        String endLabelName = labelInfoEntity.getEnd_label_name();
-
-        String[] labelProp = labelInfoEntity.getTarget_label_properties().split(",");
-        String[] tbColumn = labelInfoEntity.getSource_columns().split(",");
-        String setclaus = "";
-        for(int i=0; i<labelProp.length; i++) {
-            if(i > 0) {
-                setclaus = setclaus + ", \"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
-            } else {
-                setclaus = "\"" + labelProp[i] + "\":" + after.getAsJsonObject().get(tbColumn[i]);
-            }
-        }
-
-        String sql = 
-            "update " + graphName + "." + targetLabelName + " c"
-            + " set properties = concat('{" + setclaus + "}')::agtype"
-            + " from " + sourceSchema + "." + sourceTableName + " a,"
-            + "("
-            + " select * from cypher('" + graphName + "', $$"
-            + " match(v:" + startLabelName + ")-[e:" + targetLabelName + "]->(v2:" + endLabelName + ")"
-            + " WHERE v." + startLabelId + " = " + startLb
-            + " AND v2." + endLabelId + " = " + endLb
-            + " return v." + startLabelId + ", id(e), v2." + endLabelId + ""
-            + " $$) AS (" + startLabelId + " agtype, egid agtype, " + endLabelId + " agtype)"
-            + ") b"
-            + " WHERE 1 = 1 " + conditions;
-        jdbcTemplate.execute(sql);
-    }
-    */
-
-    /*
-    @Deprecated
-    public void deleteEdgeData(JsonObject before, ColumnInfoEntity columnInfoEntity) {
-        String startLb = before.getAsJsonObject().get("start_id").getAsString();
-        String endLb = before.getAsJsonObject().get("end_id").getAsString();
-        String startLabelId = labelInfoEntity.getStart_label_id();
-        String endLabelId = labelInfoEntity.getEnd_label_id();
-        String conditions = " AND v." + startLabelId + " = " + startLb + " AND v2." + endLabelId + " = " + endLb;
-        
-        String graphName = labelInfoEntity.getGraph_name();
-        String targetLabelName = labelInfoEntity.getTarget_label_name();
-        String startLabelName = labelInfoEntity.getStart_label_name();
-        String endLabelName = labelInfoEntity.getEnd_label_name();
-
-        String sql = 
-            "select * from cypher('" + graphName + "', $$"
-            + "match(v:" + startLabelName + ")-[e:" + targetLabelName + "]->(v2:" + endLabelName + ")"
-            + " WHERE 1 = 1 " + conditions
-            + " detach delete e"
-            + " $$) AS (e agtype)";
-             */
-        /* 테스트
-         * select * from test.acted_in a,
-            person b,
-            movie c
-            WHERE 1=1
-            AND a.start_id = b.id
-            AND a.end_id = c.id
-            AND b.properties ->> 'act_no' = 7::text
-            AND c.properties ->> 'movie_no' = 1003::text;
-        //jdbcTemplate.execute(sql);
-    }
-    */
 
     private String getTimestampToDate(String timestampStr) {
         long timestamp = Long.parseLong(timestampStr);
